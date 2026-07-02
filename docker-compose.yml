@@ -32,7 +32,7 @@ services:
     container_name: alphasync-api
     restart: always
     ports:
-      - "8001:8000"
+      - "8002:8000"
     environment:
       - POSTGRES_HOST=db
       - POSTGRES_USER=alphasync_user
