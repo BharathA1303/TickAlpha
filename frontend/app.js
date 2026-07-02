@@ -7,7 +7,7 @@ const state = {
     subscriptions: [],
     ticksData: {}, // symbol -> array of {time, price, volume}
     chartSymbol: null,
-    apiBase: "http://localhost:8000"
+    apiBase: window.location.origin
 };
 
 // Canvas Chart Configuration
