@@ -18,23 +18,62 @@ const chartConfig = {
     padding: { top: 40, right: 80, bottom: 40, left: 60 }
 };
 
-// Initialize Application
+// Initialize Application: only the login gate is wired up until admin authenticates.
 document.addEventListener("DOMContentLoaded", () => {
+    initAdminLoginGate();
+});
+
+function initAdminLoginGate() {
+    document.getElementById("admin-login-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const username = document.getElementById("admin-username").value.trim();
+        const password = document.getElementById("admin-password").value;
+        const errorEl = document.getElementById("admin-login-error");
+        errorEl.classList.add("hidden");
+
+        try {
+            const res = await fetch(`${state.apiBase}/v1/auth/admin-login`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username, password })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || "Admin login failed");
+            }
+
+            const data = await res.json();
+            state.adminToken = data.access_token;
+
+            document.getElementById("login-gate").classList.add("hidden");
+            document.getElementById("app-container").classList.remove("hidden");
+
+            initApp();
+        } catch (err) {
+            errorEl.innerText = err.message;
+            errorEl.classList.remove("hidden");
+        }
+    });
+}
+
+// Runs once, after the admin has successfully logged in
+function initApp() {
     initNavigation();
     initForms();
     checkApiHealth();
-    
+
     // Set default session date to 4 days ago to ensure compliance
     const dateInput = document.getElementById("session-date");
     const fourDaysAgo = new Date();
     fourDaysAgo.setDate(fourDaysAgo.getDate() - 4);
     dateInput.value = fourDaysAgo.toISOString().split("T")[0];
-    
+
     // Initialize Canvas Chart
     chartConfig.canvas = document.getElementById("tick-chart");
     chartConfig.ctx = chartConfig.canvas.getContext("2d");
     drawChartPlaceholder("Select an instrument & subscribe to start feed");
-    
+
     // Clipboard helper
     document.getElementById("copy-jwt-btn").addEventListener("click", () => {
         const tokenStr = document.getElementById("jwt-token-string").innerText;
@@ -44,7 +83,10 @@ document.addEventListener("DOMContentLoaded", () => {
             setTimeout(() => { btn.innerText = "Copy Token"; }, 2000);
         });
     });
-});
+
+    logToTerminal("Admin: Logged in successfully.");
+    refreshAdminKeys();
+}
 
 // Navigation Handling
 function initNavigation() {
@@ -132,41 +174,6 @@ function initForms() {
             
         } catch (err) {
             logToTerminal(`Error: ${err.message}`, "error-log");
-            alert(err.message);
-        }
-    });
-
-    // 1B. Admin Login Form
-    document.getElementById("admin-login-form").addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const username = document.getElementById("admin-username").value.trim();
-        const password = document.getElementById("admin-password").value;
-
-        logToTerminal(`Admin: Logging in as '${username}'...`);
-
-        try {
-            const res = await fetch(`${state.apiBase}/v1/auth/admin-login`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, password })
-            });
-
-            if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.detail || "Admin login failed");
-            }
-
-            const data = await res.json();
-            state.adminToken = data.access_token;
-
-            document.getElementById("admin-login-card").classList.add("hidden");
-            document.getElementById("admin-console").classList.remove("hidden");
-
-            logToTerminal("Admin: Logged in successfully.");
-            await refreshAdminKeys();
-
-        } catch (err) {
-            logToTerminal(`Admin Error: ${err.message}`, "error-log");
             alert(err.message);
         }
     });

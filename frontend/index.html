@@ -10,7 +10,32 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="app-container">
+    <!-- Full-Screen Admin Login Gate: nothing else renders until this is passed -->
+    <div class="login-gate" id="login-gate">
+        <div class="login-gate-card">
+            <div class="brand" style="margin-bottom: 24px; justify-content: center;">
+                <span class="brand-logo">Δ</span>
+                <h2 class="brand-name">AlphaSync</h2>
+                <span class="badge">Data Layer</span>
+            </div>
+            <h3 style="margin-bottom: 6px;">Admin Sign In</h3>
+            <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 24px;">Sign in with the administrator account to access the console.</p>
+            <form id="admin-login-form">
+                <div class="form-group">
+                    <label for="admin-username">Username</label>
+                    <input type="text" id="admin-username" placeholder="admin1" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="admin-password">Password</label>
+                    <input type="password" id="admin-password" placeholder="••••••••" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn primary-btn" style="width: 100%;">Login</button>
+                <p id="admin-login-error" class="text-warning hidden" style="margin-top: 12px; font-size: 12px;"></p>
+            </form>
+        </div>
+    </div>
+
+    <div class="app-container hidden" id="app-container">
         <!-- Sidebar Navigation -->
         <aside class="sidebar">
             <div class="brand">
@@ -18,13 +43,13 @@
                 <h2 class="brand-name">AlphaSync</h2>
                 <span class="badge">Data Layer</span>
             </div>
-            
+
             <nav class="nav-menu">
-                <a href="#auth" class="nav-item active" id="nav-auth">
-                    <span class="icon">🔑</span> Authenticate
-                </a>
-                <a href="#admin" class="nav-item" id="nav-admin">
+                <a href="#admin" class="nav-item active" id="nav-admin">
                     <span class="icon">⚙️</span> Admin Portal
+                </a>
+                <a href="#auth" class="nav-item" id="nav-auth">
+                    <span class="icon">🔑</span> Authenticate
                 </a>
                 <a href="#sessions" class="nav-item" id="nav-sessions">
                     <span class="icon">⏳</span> Replay Sessions
@@ -36,7 +61,7 @@
                     <span class="icon">📚</span> Historical Data
                 </a>
             </nav>
-            
+
             <div class="system-status">
                 <div class="status-indicator online"></div>
                 <div class="status-text">
@@ -49,7 +74,7 @@
         <!-- Main Content Area -->
         <main class="main-content">
             <header class="top-header">
-                <h1 id="page-title">Developer Credentials</h1>
+                <h1 id="page-title">Admin Portal</h1>
                 <div class="auth-badge" id="token-status">
                     <span class="indicator red"></span>
                     <span class="text">No Active Session Token</span>
@@ -57,12 +82,12 @@
             </header>
 
             <div class="content-wrapper">
-                <!-- Section 1: Authentication -->
-                <section id="section-auth" class="tab-content active">
+                <!-- Section 1: Authentication (client API key -> JWT, for testing replay sessions) -->
+                <section id="section-auth" class="tab-content">
                     <div class="card">
                         <div class="card-header">
                             <h3>Connect to Data Layer</h3>
-                            <p>Enter your Client ID and Client Secret to authenticate and retrieve a secure JWT session token.</p>
+                            <p>Enter a Client ID and Client Secret to authenticate and retrieve a secure JWT session token.</p>
                         </div>
                         <div class="card-body">
                             <form id="auth-form">
@@ -93,31 +118,9 @@
                     </div>
                 </section>
 
-                <!-- Section 1B: Admin Portal -->
-                <section id="section-admin" class="tab-content">
-                    <!-- Admin Login Gate -->
-                    <div class="card" id="admin-login-card">
-                        <div class="card-header">
-                            <h3>Admin Console Login</h3>
-                            <p>Sign in with the administrator account to manage API keys.</p>
-                        </div>
-                        <div class="card-body">
-                            <form id="admin-login-form">
-                                <div class="form-group">
-                                    <label for="admin-username">Username</label>
-                                    <input type="text" id="admin-username" placeholder="admin1" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="admin-password">Password</label>
-                                    <input type="password" id="admin-password" placeholder="••••••••" required>
-                                </div>
-                                <button type="submit" class="btn primary-btn">Login as Admin</button>
-                            </form>
-                        </div>
-                    </div>
-
-                    <!-- Admin Console (hidden until logged in) -->
-                    <div id="admin-console" class="hidden">
+                <!-- Section 1B: Admin Portal (accessible only after the admin login gate is passed) -->
+                <section id="section-admin" class="tab-content active">
+                    <div id="admin-console">
                         <div class="grid-2col">
                             <div class="card">
                                 <div class="card-header">

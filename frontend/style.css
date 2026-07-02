@@ -824,3 +824,28 @@ input:focus, select:focus {
     font-size: 10px;
 }
 
+/* Full-Screen Admin Login Gate */
+.login-gate {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--bg-dark);
+    z-index: 1000;
+}
+
+.login-gate-card {
+    width: 100%;
+    max-width: 380px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 36px 32px;
+    text-align: center;
+}
+
+.login-gate-card .form-group {
+    text-align: left;
+}
+
