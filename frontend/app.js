@@ -1,6 +1,7 @@
 // Global Application State
 const state = {
     accessToken: null,
+    adminToken: null,
     activeSession: null,
     websocket: null,
     subscriptions: [],
@@ -135,49 +136,99 @@ function initForms() {
         }
     });
 
-    // 1B. Admin Key Form
-    document.getElementById("admin-key-form").addEventListener("submit", async (e) => {
+    // 1B. Admin Login Form
+    document.getElementById("admin-login-form").addEventListener("submit", async (e) => {
         e.preventDefault();
-        if (!state.accessToken) {
-            alert("Please authenticate using your developer keys first to authorize administrative operations!");
-            return;
-        }
-        
-        const owner = document.getElementById("admin-owner").value.trim();
-        const checkedScopes = Array.from(document.querySelectorAll('input[name="admin-scopes"]:checked')).map(cb => cb.value);
-        const rateLimit = parseInt(document.getElementById("admin-rate-limit").value);
-        
-        logToTerminal(`Admin: Generating client API credentials for owner '${owner}'...`);
-        
+        const username = document.getElementById("admin-username").value.trim();
+        const password = document.getElementById("admin-password").value;
+
+        logToTerminal(`Admin: Logging in as '${username}'...`);
+
         try {
-            const res = await fetch(`${state.apiBase}/v1/admin/keys`, {
+            const res = await fetch(`${state.apiBase}/v1/auth/admin-login`, {
                 method: "POST",
-                headers: { 
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${state.accessToken}`
-                },
-                body: JSON.stringify({ owner: owner, scopes: checkedScopes, rate_limit_per_min: rateLimit })
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username, password })
             });
-            
+
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.detail || "Failed to generate keys");
+                throw new Error(err.detail || "Admin login failed");
             }
-            
+
             const data = await res.json();
-            
-            // Render credentials card
-            document.getElementById("generated-client-id").value = data.client_id;
-            document.getElementById("generated-client-secret").value = data.client_secret;
-            document.getElementById("generated-keys-card").classList.remove("hidden");
-            
-            logToTerminal(`Admin: Credentials successfully created for '${owner}'.`);
-            
+            state.adminToken = data.access_token;
+
+            document.getElementById("admin-login-card").classList.add("hidden");
+            document.getElementById("admin-console").classList.remove("hidden");
+
+            logToTerminal("Admin: Logged in successfully.");
+            await refreshAdminKeys();
+
         } catch (err) {
             logToTerminal(`Admin Error: ${err.message}`, "error-log");
             alert(err.message);
         }
     });
+
+    // 1C. Admin Key Create Form
+    document.getElementById("admin-key-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        if (!state.adminToken) {
+            alert("Please log in to the admin console first!");
+            return;
+        }
+
+        const owner = document.getElementById("admin-owner").value.trim();
+        const name = document.getElementById("admin-name").value.trim();
+        const checkedScopes = Array.from(document.querySelectorAll('input[name="admin-scopes"]:checked')).map(cb => cb.value);
+        const symbolsRaw = document.getElementById("admin-symbols").value.trim();
+        const allowedSymbols = symbolsRaw ? symbolsRaw.split(",").map(s => s.trim().toUpperCase()).filter(Boolean) : [];
+        const maxReplaySpeed = parseInt(document.getElementById("admin-max-speed").value);
+        const rateLimit = parseInt(document.getElementById("admin-rate-limit").value);
+
+        logToTerminal(`Admin: Generating client API credentials for owner '${owner}'...`);
+
+        try {
+            const res = await fetch(`${state.apiBase}/v1/admin/keys`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${state.adminToken}`
+                },
+                body: JSON.stringify({
+                    owner: owner,
+                    name: name,
+                    scopes: checkedScopes,
+                    allowed_symbols: allowedSymbols,
+                    max_replay_speed: maxReplaySpeed,
+                    rate_limit_per_min: rateLimit
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || "Failed to generate keys");
+            }
+
+            const data = await res.json();
+
+            // Render credentials card
+            document.getElementById("generated-client-id").value = data.client_id;
+            document.getElementById("generated-client-secret").value = data.client_secret;
+            document.getElementById("generated-keys-card").classList.remove("hidden");
+
+            logToTerminal(`Admin: Credentials successfully created for '${owner}'.`);
+            await refreshAdminKeys();
+
+        } catch (err) {
+            logToTerminal(`Admin Error: ${err.message}`, "error-log");
+            alert(err.message);
+        }
+    });
+
+    // 1D. Admin Keys Table Refresh
+    document.getElementById("btn-refresh-keys").addEventListener("click", refreshAdminKeys);
 
     // Copy buttons for generated keys
     document.getElementById("btn-copy-gen-id").addEventListener("click", (e) => {
@@ -841,6 +892,113 @@ function updateTickersSidebarList() {
         `;
     }).join("");
 }
+
+// Admin Key Management
+async function refreshAdminKeys() {
+    if (!state.adminToken) return;
+    const tbody = document.getElementById("admin-keys-tbody");
+
+    try {
+        const res = await fetch(`${state.apiBase}/v1/admin/keys`, {
+            headers: { "Authorization": `Bearer ${state.adminToken}` }
+        });
+
+        if (!res.ok) throw new Error("Failed to load API keys");
+
+        const keys = await res.json();
+
+        if (keys.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No API keys yet.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = keys.map(renderKeyRow).join("");
+    } catch (err) {
+        logToTerminal(`Admin Error: ${err.message}`, "error-log");
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Failed to load API keys.</td></tr>`;
+    }
+}
+
+function renderKeyRow(key) {
+    const scopeChips = (key.scopes || []).map(s => `<span class="scope-chip">${s}</span>`).join("");
+    const symbolsText = (key.allowed_symbols && key.allowed_symbols.length > 0)
+        ? key.allowed_symbols.join(", ")
+        : "<em>All symbols</em>";
+
+    const canPauseResume = key.status === "active" || key.status === "paused";
+    const pauseResumeBtn = key.status === "paused"
+        ? `<button class="btn btn-sm secondary-btn" onclick="adminKeyAction('${key.client_id}', 'resume')">Resume</button>`
+        : `<button class="btn btn-sm secondary-btn" onclick="adminKeyAction('${key.client_id}', 'pause')" ${key.status === 'disabled' ? 'disabled' : ''}>Pause</button>`;
+
+    const disableBtn = key.status === "disabled"
+        ? `<button class="btn btn-sm secondary-btn" onclick="adminKeyAction('${key.client_id}', 'resume')">Enable</button>`
+        : `<button class="btn btn-sm secondary-btn" onclick="adminKeyAction('${key.client_id}', 'disable')">Disable</button>`;
+
+    return `
+        <tr>
+            <td class="mono">${key.client_id}</td>
+            <td>${key.owner}${key.name ? `<br><small class="helper-text">${key.name}</small>` : ""}</td>
+            <td>${scopeChips}</td>
+            <td>${symbolsText}</td>
+            <td>${key.max_replay_speed}x</td>
+            <td><span class="status-pill ${key.status}">${key.status}</span></td>
+            <td class="key-actions">
+                ${pauseResumeBtn}
+                ${disableBtn}
+                <button class="btn btn-sm secondary-btn" style="color: var(--accent-danger);" onclick="adminDeleteKey('${key.client_id}')">Delete</button>
+            </td>
+        </tr>
+    `;
+}
+
+window.adminKeyAction = async function(clientId, action) {
+    if (!state.adminToken) return;
+
+    logToTerminal(`Admin: ${action}-ing key '${clientId}'...`);
+
+    try {
+        const res = await fetch(`${state.apiBase}/v1/admin/keys/${clientId}/${action}`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${state.adminToken}` }
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || `Failed to ${action} key`);
+        }
+
+        logToTerminal(`Admin: Key '${clientId}' ${action}d.`);
+        await refreshAdminKeys();
+    } catch (err) {
+        logToTerminal(`Admin Error: ${err.message}`, "error-log");
+        alert(err.message);
+    }
+};
+
+window.adminDeleteKey = async function(clientId) {
+    if (!state.adminToken) return;
+    if (!confirm(`Delete API key '${clientId}'? This cannot be undone from the console.`)) return;
+
+    logToTerminal(`Admin: Deleting key '${clientId}'...`);
+
+    try {
+        const res = await fetch(`${state.apiBase}/v1/admin/keys/${clientId}`, {
+            method: "DELETE",
+            headers: { "Authorization": `Bearer ${state.adminToken}` }
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || "Failed to delete key");
+        }
+
+        logToTerminal(`Admin: Key '${clientId}' deleted.`);
+        await refreshAdminKeys();
+    } catch (err) {
+        logToTerminal(`Admin Error: ${err.message}`, "error-log");
+        alert(err.message);
+    }
+};
 
 // Handle chart symbol selection
 window.selectChartSymbol = function(symbolSpec) {

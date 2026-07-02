@@ -5,9 +5,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.config import settings
 from app.db.session import get_db
 from app.db.models import APIKey
-from app.core.auth import hash_secret, create_access_token, verify_jwt_token
+from app.core.auth import hash_secret, create_access_token, verify_jwt_token, ADMIN_SUBJECT
 from app.core.cache import set_cached_response, redis_client
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,29 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int = 3600
+
+class AdminLoginRequest(BaseModel):
+    username: str = Field(..., description="Admin console username")
+    password: str = Field(..., description="Admin console password")
+
+@router.post("/admin-login", response_model=TokenResponse)
+async def admin_login(req: AdminLoginRequest):
+    """
+    Authenticates the admin console user and issues an admin-scoped JWT.
+    """
+    if req.username != settings.ADMIN_USERNAME or req.password != settings.ADMIN_PASSWORD:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin username or password"
+        )
+
+    access_token = create_access_token(
+        client_id=ADMIN_SUBJECT,
+        scopes=["admin"],
+        expires_in_seconds=3600
+    )
+
+    return TokenResponse(access_token=access_token, expires_in=3600)
 
 class FeedTokenRequest(BaseModel):
     session_id: str = Field(..., description="The ID of the active replay session")

@@ -260,18 +260,25 @@ async def test_ingestion_status_endpoint(client: AsyncClient, seed_data: dict):
 
 @pytest.mark.asyncio
 async def test_admin_generate_keys(client: AsyncClient, seed_data: dict):
-    """Verify that a user with 'admin' scope can generate new credentials."""
+    """Verify that only an authenticated admin console session can manage API keys."""
     login_res = await client.post(
-        "/v1/auth/token",
-        json={"client_id": seed_data["client_nse"], "client_secret": seed_data["secret_nse"]}
+        "/v1/auth/admin-login",
+        json={"username": "admin1", "password": "pass001"}
     )
-    token = login_res.json()["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-    
+    assert login_res.status_code == 200
+    admin_token = login_res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
     response = await client.post(
         "/v1/admin/keys",
         headers=headers,
-        json={"owner": "new-test-owner", "scopes": ["nse:eq"], "rate_limit_per_min": 100}
+        json={
+            "owner": "new-test-owner",
+            "scopes": ["nse:eq"],
+            "allowed_symbols": ["NSE:EQ:RELIANCE"],
+            "max_replay_speed": 10,
+            "rate_limit_per_min": 100,
+        }
     )
     assert response.status_code == 201
     data = response.json()
@@ -279,21 +286,62 @@ async def test_admin_generate_keys(client: AsyncClient, seed_data: dict):
     assert "client_secret" in data
     assert data["owner"] == "new-test-owner"
     assert data["scopes"] == ["nse:eq"]
+    assert data["allowed_symbols"] == ["NSE:EQ:RELIANCE"]
+    assert data["max_replay_speed"] == 10
 
-    # Verify that a user WITHOUT 'admin' scope cannot generate keys (403)
-    login_bse = await client.post(
+    new_client_id = data["client_id"]
+
+    # List keys
+    list_res = await client.get("/v1/admin/keys", headers=headers)
+    assert list_res.status_code == 200
+    assert any(k["client_id"] == new_client_id for k in list_res.json())
+
+    # Pause the key
+    pause_res = await client.post(f"/v1/admin/keys/{new_client_id}/pause", headers=headers)
+    assert pause_res.status_code == 200
+    assert pause_res.json()["status"] == "paused"
+    assert pause_res.json()["is_active"] is False
+
+    # Resume the key
+    resume_res = await client.post(f"/v1/admin/keys/{new_client_id}/resume", headers=headers)
+    assert resume_res.status_code == 200
+    assert resume_res.json()["status"] == "active"
+
+    # Disable the key
+    disable_res = await client.post(f"/v1/admin/keys/{new_client_id}/disable", headers=headers)
+    assert disable_res.status_code == 200
+    assert disable_res.json()["status"] == "disabled"
+
+    # Delete (soft) the key
+    delete_res = await client.delete(f"/v1/admin/keys/{new_client_id}", headers=headers)
+    assert delete_res.status_code == 200
+    assert delete_res.json()["status"] == "deleted"
+
+    # Deleted key no longer appears in listings
+    list_res_after = await client.get("/v1/admin/keys", headers=headers)
+    assert not any(k["client_id"] == new_client_id for k in list_res_after.json())
+
+    # Verify that a regular API-key JWT (even with 'admin' scope) cannot manage keys (403)
+    login_res_nse = await client.post(
         "/v1/auth/token",
-        json={"client_id": seed_data["client_bse"], "client_secret": seed_data["secret_bse"]}
+        json={"client_id": seed_data["client_nse"], "client_secret": seed_data["secret_nse"]}
     )
-    token_bse = login_bse.json()["access_token"]
-    headers_bse = {"Authorization": f"Bearer {token_bse}"}
-    
+    token_nse = login_res_nse.json()["access_token"]
+    headers_nse = {"Authorization": f"Bearer {token_nse}"}
+
     response_fail = await client.post(
         "/v1/admin/keys",
-        headers=headers_bse,
+        headers=headers_nse,
         json={"owner": "hacky-owner"}
     )
     assert response_fail.status_code == 403
+
+    # Verify wrong admin credentials are rejected
+    bad_login = await client.post(
+        "/v1/auth/admin-login",
+        json={"username": "admin1", "password": "wrong-password"}
+    )
+    assert bad_login.status_code == 401
 
 @pytest.mark.asyncio
 async def test_bulk_subscription_wildcards(client: AsyncClient, seed_data: dict):

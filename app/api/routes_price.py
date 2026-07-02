@@ -14,6 +14,18 @@ from app.core.cache import get_cached_response, set_cached_response
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/price", tags=["Price Data"])
 
+
+def _check_symbol_allowed(client: APIKey, exchange: str, segment: str, symbol: str):
+    """Enforces the admin-controlled per-key symbol allowlist. Empty list = all symbols allowed."""
+    if not client.allowed_symbols:
+        return
+    spec = f"{exchange}:{segment}:{symbol}".upper()
+    if spec not in {s.upper() for s in client.allowed_symbols}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Client's API key is not permitted to access symbol '{spec}'"
+        )
+
 @router.get("/{exchange}/{symbol}")
 async def get_latest_price(
     exchange: str,
@@ -40,7 +52,8 @@ async def get_latest_price(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Access token missing required scope: {required_scope}",
         )
-        
+    _check_symbol_allowed(client, exchange_upper, segment_upper, symbol_upper)
+
     # 2. Check Cache
     cache_key = f"price:latest:{exchange_upper}:{segment_upper}:{symbol_upper}:{expiry}:{strike}:{option_type}"
     cached_val = await get_cached_response(cache_key)
@@ -104,7 +117,8 @@ async def get_price_range(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Access token missing required scope: {required_scope}",
         )
-        
+    _check_symbol_allowed(client, exchange_upper, segment_upper, symbol_upper)
+
     # 2. Check Cache
     cache_key = f"price:range:{exchange_upper}:{segment_upper}:{symbol_upper}:{start.isoformat()}:{end.isoformat()}:{expiry}:{strike}:{option_type}"
     cached_val = await get_cached_response(cache_key)

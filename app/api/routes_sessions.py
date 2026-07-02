@@ -60,6 +60,17 @@ async def get_session_state(session_id: str) -> Optional[dict]:
     raw = await get_cached_response(f"session:{session_id}")
     return json.loads(raw) if raw else None
 
+
+def is_symbol_allowed(client: APIKey, resolved_spec: str) -> bool:
+    """
+    Checks whether a client's key permits access to a given EXCHANGE:SEGMENT:SYMBOL.
+    An empty allowed_symbols list means all symbols within the client's scopes are permitted.
+    """
+    if not client.allowed_symbols:
+        return True
+    return resolved_spec.upper() in {s.upper() for s in client.allowed_symbols}
+
+
 @router.post("", response_model=SessionResponse)
 async def create_session(req: SessionCreate, client: APIKey = Depends(verify_jwt_token)):
     """
@@ -73,7 +84,15 @@ async def create_session(req: SessionCreate, client: APIKey = Depends(verify_jwt
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Requested date {req.date} is restricted. Maximum allowed date is {cutoff} (3-day delay)."
         )
-        
+
+    # 2. Enforce per-key maximum replay speed cap
+    max_speed = getattr(client, "max_replay_speed", 60) or 60
+    if req.replay_speed > max_speed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Requested replay speed {req.replay_speed}x exceeds this key's maximum allowed speed of {max_speed}x."
+        )
+
     session_id = f"sess_{uuid.uuid4().hex[:16]}"
     session_state = {
         "session_id": session_id,
@@ -222,7 +241,17 @@ async def subscribe_symbols(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail=f"Client missing scope '{required_scope}' required for symbol '{resolved_spec}'"
                     )
-            
+
+            # Verify client's symbol allowlist (admin-controlled per-key restriction)
+            if not is_symbol_allowed(client, resolved_spec):
+                if spec_upper == "ALL" or spec_upper.endswith(":ALL"):
+                    continue
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Client's API key is not permitted to access symbol '{resolved_spec}'"
+                    )
+
             # Trigger tick cache generation (Brownian Bridge generation) using preloaded EOD data
             eod_obj = eod_map.get((exchange, segment, symbol))
             success = await ensure_ticks_cached(

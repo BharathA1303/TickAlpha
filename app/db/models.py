@@ -77,9 +77,15 @@ class APIKey(Base):
     client_id = Column(String(64), unique=True, nullable=False, index=True)  # Public API key ID
     secret_hash = Column(String(64), nullable=False)  # SHA-256 hash of client secret
     owner = Column(String(100), nullable=False)
+    name = Column(String(100), nullable=False, server_default="", default="")
     scopes = Column(ARRAY(String), nullable=False, server_default="{}")  # e.g., ['nse:eq', 'nse:fo', 'mcx:com']
+    # Symbols this key may access, format EXCHANGE:SEGMENT:SYMBOL. Empty list = all symbols allowed within its scopes.
+    allowed_symbols = Column(ARRAY(String), nullable=False, server_default="{}")
+    max_replay_speed = Column(Integer, nullable=False, server_default="60", default=60)
     rate_limit_per_min = Column(Integer, nullable=False, default=60)
     is_active = Column(Boolean, nullable=False, default=True)
+    # One of: "active", "paused", "disabled", "deleted"
+    status = Column(String(20), nullable=False, server_default="active", default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     def to_dict(self):
@@ -87,8 +93,12 @@ class APIKey(Base):
             "id": self.id,
             "client_id": self.client_id,
             "owner": self.owner,
+            "name": self.name,
             "scopes": self.scopes,
+            "allowed_symbols": self.allowed_symbols,
+            "max_replay_speed": self.max_replay_speed,
             "rate_limit_per_min": self.rate_limit_per_min,
+            "status": self.status,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

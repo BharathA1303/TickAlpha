@@ -749,4 +749,78 @@ input:focus, select:focus {
 .ticker-badge.nse-opt { background-color: #d97706; }
 .ticker-badge.mcx-fut { background-color: #dc2626; }
 
+/* Admin Keys Management Table */
+.table-scroll {
+    overflow-x: auto;
+}
+
+.admin-keys-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.admin-keys-table th {
+    text-align: left;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.admin-keys-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: top;
+}
+
+.admin-keys-table td.empty-state {
+    text-align: center;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.admin-keys-table .mono {
+    font-family: monospace;
+    font-size: 11px;
+}
+
+.admin-keys-table .scope-chip {
+    display: inline-block;
+    background-color: var(--border-color);
+    color: var(--text-primary);
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin: 2px 4px 2px 0;
+}
+
+.status-pill {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 10px;
+    letter-spacing: 0.5px;
+}
+
+.status-pill.active { background-color: rgba(16, 185, 129, 0.15); color: var(--accent-success); }
+.status-pill.paused { background-color: rgba(245, 158, 11, 0.15); color: var(--accent-warning); }
+.status-pill.disabled { background-color: rgba(239, 68, 68, 0.15); color: var(--accent-danger); }
+.status-pill.deleted { background-color: rgba(144, 164, 174, 0.15); color: var(--text-secondary); }
+
+.key-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.key-actions button {
+    padding: 4px 8px;
+    font-size: 10px;
+}
 

@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "5a585e3b348f0e560880a24de2e734f63a16d2f7ead55cc55f46c60ff34aee2c"
     JWT_ALGORITHM: str = "HS256"
 
+    # Admin Console Login
+    ADMIN_USERNAME: str = "admin1"
+    ADMIN_PASSWORD: str = "pass001"
+
 
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),

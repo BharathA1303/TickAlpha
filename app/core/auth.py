@@ -123,6 +123,46 @@ async def verify_jwt_token(
     return db_client
 
 
+ADMIN_SUBJECT = "admin"
+
+async def require_admin(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
+) -> str:
+    """
+    FastAPI dependency that verifies the JWT belongs to the admin console login
+    (sub == ADMIN_SUBJECT and 'admin' in scopes), not a regular API client.
+    """
+    if not credentials or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid admin token (use Bearer <token>)",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        payload = decode_access_token(credentials.credentials)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if payload.get("sub") != ADMIN_SUBJECT or "admin" not in payload.get("scopes", []):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
+
+    return payload["sub"]
+
+
 class VerifyScopes:
     """
     Dependency factory to check if client token contains necessary scopes.

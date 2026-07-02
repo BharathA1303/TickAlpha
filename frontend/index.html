@@ -93,61 +93,132 @@
                     </div>
                 </section>
 
-                <!-- Section 1B: Admin Portal Credentials Generator -->
+                <!-- Section 1B: Admin Portal -->
                 <section id="section-admin" class="tab-content">
-                    <div class="grid-2col">
-                        <div class="card">
-                            <div class="card-header">
-                                <h3>Generate Client Credentials</h3>
-                                <p>Generate a new API Client ID and Secret key pair. Secret hashes will be stored securely in the database.</p>
+                    <!-- Admin Login Gate -->
+                    <div class="card" id="admin-login-card">
+                        <div class="card-header">
+                            <h3>Admin Console Login</h3>
+                            <p>Sign in with the administrator account to manage API keys.</p>
+                        </div>
+                        <div class="card-body">
+                            <form id="admin-login-form">
+                                <div class="form-group">
+                                    <label for="admin-username">Username</label>
+                                    <input type="text" id="admin-username" placeholder="admin1" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="admin-password">Password</label>
+                                    <input type="password" id="admin-password" placeholder="••••••••" required>
+                                </div>
+                                <button type="submit" class="btn primary-btn">Login as Admin</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Admin Console (hidden until logged in) -->
+                    <div id="admin-console" class="hidden">
+                        <div class="grid-2col">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3>Create API Key</h3>
+                                    <p>Create a scoped, symbol-restricted API key with a controllable playback speed cap.</p>
+                                </div>
+                                <div class="card-body">
+                                    <form id="admin-key-form">
+                                        <div class="form-group">
+                                            <label for="admin-owner">Client/Owner Name</label>
+                                            <input type="text" id="admin-owner" placeholder="e.g. trading-bot-1" required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="admin-name">Key Label (optional)</label>
+                                            <input type="text" id="admin-name" placeholder="e.g. Prod bot key">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Segments / Scopes</label>
+                                            <div class="checkbox-group">
+                                                <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="nse:eq" checked> NSE Cash Equities (nse:eq)</label>
+                                                <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="bse:eq" checked> BSE Cash Equities (bse:eq)</label>
+                                                <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="nse:fut" checked> NSE Futures - F&O (nse:fut)</label>
+                                                <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="nse:opt" checked> NSE Options - F&O (nse:opt)</label>
+                                                <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="mcx:fut" checked> MCX Commodities (mcx:fut)</label>
+                                                <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="cds:fut"> Currency Derivatives (cds:fut)</label>
+                                                <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="admin"> Admin Operations (admin)</label>
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="admin-symbols">Allowed Symbols (optional)</label>
+                                            <input type="text" id="admin-symbols" placeholder="e.g. NSE:EQ:RELIANCE, MCX:FUT:GOLD">
+                                            <small class="helper-text">Comma-separated EXCHANGE:SEGMENT:SYMBOL. Leave blank to allow all symbols within the selected segments.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="admin-max-speed">Max Tick Playback Speed</label>
+                                            <select id="admin-max-speed">
+                                                <option value="1">1x (Real-time only)</option>
+                                                <option value="5">5x</option>
+                                                <option value="10">10x</option>
+                                                <option value="30">30x</option>
+                                                <option value="60" selected>60x (Maximum speed)</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="admin-rate-limit">Rate Limit (requests/min)</label>
+                                            <input type="number" id="admin-rate-limit" value="60" min="1" max="1000" required>
+                                        </div>
+                                        <button type="submit" class="btn primary-btn">Create API Key</button>
+                                    </form>
+                                </div>
                             </div>
-                            <div class="card-body">
-                                <form id="admin-key-form">
-                                    <div class="form-group">
-                                        <label for="admin-owner">Client/Owner Name</label>
-                                        <input type="text" id="admin-owner" placeholder="e.g. trading-bot-1" required>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Scopes</label>
-                                        <div class="checkbox-group">
-                                            <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="nse:eq" checked> NSE Cash Equities (nse:eq)</label>
-                                            <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="bse:eq" checked> BSE Cash Equities (bse:eq)</label>
-                                            <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="nse:fut" checked> NSE Futures (nse:fut)</label>
-                                            <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="nse:opt" checked> NSE Options (nse:opt)</label>
-                                            <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="mcx:fut" checked> MCX Commodities (mcx:fut)</label>
-                                            <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="admin"> Admin Operations (admin)</label>
+
+                            <div class="card token-card hidden" id="generated-keys-card">
+                                <div class="card-header">
+                                    <h3>Generated Client API Credentials</h3>
+                                    <p class="text-warning" style="margin-top: 4px; font-weight: 500;">⚠️ COPY THE SECRET KEY NOW. It will NEVER be shown again.</p>
+                                </div>
+                                <div class="card-body">
+                                    <div class="credentials-display">
+                                        <div class="form-group">
+                                            <label>Client ID (API Key)</label>
+                                            <div class="copyable-field">
+                                                <input type="text" id="generated-client-id" readonly style="width: 100%;">
+                                                <button class="btn btn-sm secondary-btn" id="btn-copy-gen-id" style="margin-top: 4px;">Copy</button>
+                                            </div>
+                                        </div>
+                                        <div class="form-group" style="margin-top: 16px;">
+                                            <label>Client Secret</label>
+                                            <div class="copyable-field">
+                                                <input type="text" id="generated-client-secret" readonly style="width: 100%;">
+                                                <button class="btn btn-sm secondary-btn" id="btn-copy-gen-secret" style="margin-top: 4px;">Copy</button>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div class="form-group">
-                                        <label for="admin-rate-limit">Rate Limit (requests/min)</label>
-                                        <input type="number" id="admin-rate-limit" value="60" min="1" max="1000" required>
-                                    </div>
-                                    <button type="submit" class="btn primary-btn">Create API Keys</button>
-                                </form>
+                                </div>
                             </div>
                         </div>
 
-                        <div class="card token-card hidden" id="generated-keys-card">
+                        <div class="card" style="margin-top: 24px;">
                             <div class="card-header">
-                                <h3>Generated Client API Credentials</h3>
-                                <p class="text-warning" style="margin-top: 4px; font-weight: 500;">⚠️ COPY THE SECRET KEY NOW. It will NEVER be shown again.</p>
+                                <h3>Manage API Keys</h3>
+                                <button class="btn btn-sm secondary-btn" id="btn-refresh-keys">Refresh</button>
                             </div>
                             <div class="card-body">
-                                <div class="credentials-display">
-                                    <div class="form-group">
-                                        <label>Client ID (API Key)</label>
-                                        <div class="copyable-field">
-                                            <input type="text" id="generated-client-id" readonly style="width: 100%;">
-                                            <button class="btn btn-sm secondary-btn" id="btn-copy-gen-id" style="margin-top: 4px;">Copy</button>
-                                        </div>
-                                    </div>
-                                    <div class="form-group" style="margin-top: 16px;">
-                                        <label>Client Secret</label>
-                                        <div class="copyable-field">
-                                            <input type="text" id="generated-client-secret" readonly style="width: 100%;">
-                                            <button class="btn btn-sm secondary-btn" id="btn-copy-gen-secret" style="margin-top: 4px;">Copy</button>
-                                        </div>
-                                    </div>
+                                <div class="table-scroll">
+                                    <table class="admin-keys-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Client ID</th>
+                                                <th>Owner / Label</th>
+                                                <th>Scopes</th>
+                                                <th>Symbols</th>
+                                                <th>Max Speed</th>
+                                                <th>Status</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="admin-keys-tbody">
+                                            <tr><td colspan="7" class="empty-state">No API keys yet.</td></tr>
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
                         </div>
