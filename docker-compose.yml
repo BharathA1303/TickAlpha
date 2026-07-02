@@ -9,8 +9,6 @@ services:
       POSTGRES_USER: alphasync_user
       POSTGRES_PASSWORD: alphasync_password
       POSTGRES_DB: alphasync_data
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,8 +21,6 @@ services:
     image: redis:7-alpine
     container_name: alphasync-redis
     restart: always
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -36,7 +32,7 @@ services:
     container_name: alphasync-api
     restart: always
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
       - POSTGRES_HOST=db
       - POSTGRES_USER=alphasync_user
