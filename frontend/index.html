@@ -404,7 +404,85 @@
             </div>
         </main>
     </div>
-    
+
+    <!-- Edit API Key Modal -->
+    <div class="modal-overlay hidden" id="edit-key-modal">
+        <div class="modal-card">
+            <div class="card-header">
+                <h3>Edit API Key</h3>
+                <button class="btn btn-sm secondary-btn" id="btn-close-edit-modal">Close</button>
+            </div>
+            <div class="card-body">
+                <form id="edit-key-form">
+                    <input type="hidden" id="edit-client-id">
+                    <div class="form-group">
+                        <label for="edit-name">Key Label</label>
+                        <input type="text" id="edit-name" placeholder="e.g. Prod bot key">
+                    </div>
+                    <div class="form-group">
+                        <label>Segments / Scopes</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" name="edit-scopes" value="nse:eq"> NSE Cash Equities (nse:eq)</label>
+                            <label class="checkbox-label"><input type="checkbox" name="edit-scopes" value="bse:eq"> BSE Cash Equities (bse:eq)</label>
+                            <label class="checkbox-label"><input type="checkbox" name="edit-scopes" value="nse:fut"> NSE Futures - F&O (nse:fut)</label>
+                            <label class="checkbox-label"><input type="checkbox" name="edit-scopes" value="nse:opt"> NSE Options - F&O (nse:opt)</label>
+                            <label class="checkbox-label"><input type="checkbox" name="edit-scopes" value="mcx:fut"> MCX Commodities (mcx:fut)</label>
+                            <label class="checkbox-label"><input type="checkbox" name="edit-scopes" value="cds:fut"> Currency Derivatives (cds:fut)</label>
+                            <label class="checkbox-label"><input type="checkbox" name="edit-scopes" value="admin"> Admin Operations (admin)</label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-symbols">Allowed Symbols (optional)</label>
+                        <input type="text" id="edit-symbols" placeholder="e.g. NSE:EQ:RELIANCE, MCX:FUT:GOLD">
+                        <small class="helper-text">Comma-separated EXCHANGE:SEGMENT:SYMBOL. Leave blank to allow all symbols within the selected segments.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-max-speed">Max Tick Playback Speed</label>
+                        <select id="edit-max-speed">
+                            <option value="1">1x (Real-time only)</option>
+                            <option value="5">5x</option>
+                            <option value="10">10x</option>
+                            <option value="30">30x</option>
+                            <option value="60">60x (Maximum speed)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-rate-limit">Rate Limit (requests/min)</label>
+                        <input type="number" id="edit-rate-limit" min="1" max="1000" required>
+                    </div>
+                    <button type="submit" class="btn primary-btn">Save Changes</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Regenerated / New Secret Reveal Modal -->
+    <div class="modal-overlay hidden" id="secret-reveal-modal">
+        <div class="modal-card">
+            <div class="card-header">
+                <h3>New Client Secret Generated</h3>
+                <button class="btn btn-sm secondary-btn" id="btn-close-secret-modal">Close</button>
+            </div>
+            <div class="card-body">
+                <p class="text-warning" style="font-weight: 500; margin-bottom: 16px;">⚠️ COPY THIS SECRET NOW. It will NEVER be shown again.</p>
+                <div class="form-group">
+                    <label>Client ID</label>
+                    <div class="copyable-field">
+                        <input type="text" id="reveal-client-id" readonly style="width: 100%;">
+                        <button class="btn btn-sm secondary-btn" id="btn-copy-reveal-id">Copy</button>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 16px;">
+                    <label>Client Secret</label>
+                    <div class="copyable-field">
+                        <input type="text" id="reveal-client-secret" readonly style="width: 100%;">
+                        <button class="btn btn-sm secondary-btn" id="btn-copy-reveal-secret">Copy</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>

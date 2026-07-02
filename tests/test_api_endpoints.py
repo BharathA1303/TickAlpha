@@ -307,6 +307,35 @@ async def test_admin_generate_keys(client: AsyncClient, seed_data: dict):
     assert resume_res.status_code == 200
     assert resume_res.json()["status"] == "active"
 
+    # Edit the key via PATCH
+    patch_res = await client.patch(
+        f"/v1/admin/keys/{new_client_id}",
+        headers=headers,
+        json={"max_replay_speed": 30, "rate_limit_per_min": 200}
+    )
+    assert patch_res.status_code == 200
+    assert patch_res.json()["max_replay_speed"] == 30
+    assert patch_res.json()["rate_limit_per_min"] == 200
+
+    # Regenerate the secret and verify the old one stops working while the new one works
+    old_secret = data["client_secret"]
+    regen_res = await client.post(f"/v1/admin/keys/{new_client_id}/regenerate-secret", headers=headers)
+    assert regen_res.status_code == 200
+    new_secret = regen_res.json()["client_secret"]
+    assert new_secret != old_secret
+
+    old_login = await client.post(
+        "/v1/auth/token",
+        json={"client_id": new_client_id, "client_secret": old_secret}
+    )
+    assert old_login.status_code == 401
+
+    new_login = await client.post(
+        "/v1/auth/token",
+        json={"client_id": new_client_id, "client_secret": new_secret}
+    )
+    assert new_login.status_code == 200
+
     # Disable the key
     disable_res = await client.post(f"/v1/admin/keys/{new_client_id}/disable", headers=headers)
     assert disable_res.status_code == 200

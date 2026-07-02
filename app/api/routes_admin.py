@@ -174,6 +174,34 @@ async def update_client_credentials(
     return key.to_dict()
 
 
+@admin_keys_router.post("/keys/{client_id}/regenerate-secret", response_model=KeyGenerateResponse)
+async def regenerate_client_secret(
+    client_id: str,
+    db: AsyncSession = Depends(get_db),
+    _admin: str = Depends(require_admin)
+):
+    """
+    Issues a brand new client secret for an existing key, invalidating the old one.
+    The plaintext secret is returned once and never stored or retrievable again.
+    """
+    key = await _get_key_or_404(db, client_id)
+
+    new_secret = f"secret_{secrets.token_urlsafe(32)}"
+    key.secret_hash = hash_secret(new_secret)
+    await db.flush()
+
+    return {
+        "client_id": key.client_id,
+        "client_secret": new_secret,
+        "owner": key.owner,
+        "name": key.name,
+        "scopes": key.scopes,
+        "allowed_symbols": key.allowed_symbols,
+        "max_replay_speed": key.max_replay_speed,
+        "rate_limit_per_min": key.rate_limit_per_min,
+    }
+
+
 @admin_keys_router.post("/keys/{client_id}/pause")
 async def pause_client_key(
     client_id: str,

@@ -237,6 +237,80 @@ function initForms() {
     // 1D. Admin Keys Table Refresh
     document.getElementById("btn-refresh-keys").addEventListener("click", refreshAdminKeys);
 
+    // 1E. Edit Key Modal
+    document.getElementById("btn-close-edit-modal").addEventListener("click", () => {
+        document.getElementById("edit-key-modal").classList.add("hidden");
+    });
+
+    document.getElementById("edit-key-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        if (!state.adminToken) return;
+
+        const clientId = document.getElementById("edit-client-id").value;
+        const name = document.getElementById("edit-name").value.trim();
+        const checkedScopes = Array.from(document.querySelectorAll('input[name="edit-scopes"]:checked')).map(cb => cb.value);
+        const symbolsRaw = document.getElementById("edit-symbols").value.trim();
+        const allowedSymbols = symbolsRaw ? symbolsRaw.split(",").map(s => s.trim().toUpperCase()).filter(Boolean) : [];
+        const maxReplaySpeed = parseInt(document.getElementById("edit-max-speed").value);
+        const rateLimit = parseInt(document.getElementById("edit-rate-limit").value);
+
+        logToTerminal(`Admin: Saving changes to key '${clientId}'...`);
+
+        try {
+            const res = await fetch(`${state.apiBase}/v1/admin/keys/${clientId}`, {
+                method: "PATCH",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${state.adminToken}`
+                },
+                body: JSON.stringify({
+                    name: name,
+                    scopes: checkedScopes,
+                    allowed_symbols: allowedSymbols,
+                    max_replay_speed: maxReplaySpeed,
+                    rate_limit_per_min: rateLimit
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || "Failed to update key");
+            }
+
+            document.getElementById("edit-key-modal").classList.add("hidden");
+            logToTerminal(`Admin: Key '${clientId}' updated.`);
+            await refreshAdminKeys();
+        } catch (err) {
+            logToTerminal(`Admin Error: ${err.message}`, "error-log");
+            alert(err.message);
+        }
+    });
+
+    // 1F. Secret Reveal Modal
+    document.getElementById("btn-close-secret-modal").addEventListener("click", () => {
+        document.getElementById("secret-reveal-modal").classList.add("hidden");
+    });
+
+    document.getElementById("btn-copy-reveal-id").addEventListener("click", (e) => {
+        e.preventDefault();
+        const val = document.getElementById("reveal-client-id").value;
+        navigator.clipboard.writeText(val).then(() => {
+            const btn = document.getElementById("btn-copy-reveal-id");
+            btn.innerText = "Copied!";
+            setTimeout(() => { btn.innerText = "Copy"; }, 2000);
+        });
+    });
+
+    document.getElementById("btn-copy-reveal-secret").addEventListener("click", (e) => {
+        e.preventDefault();
+        const val = document.getElementById("reveal-client-secret").value;
+        navigator.clipboard.writeText(val).then(() => {
+            const btn = document.getElementById("btn-copy-reveal-secret");
+            btn.innerText = "Copied!";
+            setTimeout(() => { btn.innerText = "Copy"; }, 2000);
+        });
+    });
+
     // Copy buttons for generated keys
     document.getElementById("btn-copy-gen-id").addEventListener("click", (e) => {
         e.preventDefault();
@@ -901,6 +975,8 @@ function updateTickersSidebarList() {
 }
 
 // Admin Key Management
+const adminKeysById = {}; // client_id -> key object, cached for the edit modal
+
 async function refreshAdminKeys() {
     if (!state.adminToken) return;
     const tbody = document.getElementById("admin-keys-tbody");
@@ -913,6 +989,9 @@ async function refreshAdminKeys() {
         if (!res.ok) throw new Error("Failed to load API keys");
 
         const keys = await res.json();
+
+        Object.keys(adminKeysById).forEach(k => delete adminKeysById[k]);
+        keys.forEach(k => { adminKeysById[k.client_id] = k; });
 
         if (keys.length === 0) {
             tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No API keys yet.</td></tr>`;
@@ -950,6 +1029,8 @@ function renderKeyRow(key) {
             <td>${key.max_replay_speed}x</td>
             <td><span class="status-pill ${key.status}">${key.status}</span></td>
             <td class="key-actions">
+                <button class="btn btn-sm secondary-btn" onclick="openEditKeyModal('${key.client_id}')">Edit</button>
+                <button class="btn btn-sm secondary-btn" onclick="adminRegenerateSecret('${key.client_id}')">Regenerate Secret</button>
                 ${pauseResumeBtn}
                 ${disableBtn}
                 <button class="btn btn-sm secondary-btn" style="color: var(--accent-danger);" onclick="adminDeleteKey('${key.client_id}')">Delete</button>
@@ -957,6 +1038,54 @@ function renderKeyRow(key) {
         </tr>
     `;
 }
+
+window.openEditKeyModal = function(clientId) {
+    const key = adminKeysById[clientId];
+    if (!key) return;
+
+    document.getElementById("edit-client-id").value = key.client_id;
+    document.getElementById("edit-name").value = key.name || "";
+    document.getElementById("edit-symbols").value = (key.allowed_symbols || []).join(", ");
+    document.getElementById("edit-max-speed").value = String(key.max_replay_speed);
+    document.getElementById("edit-rate-limit").value = key.rate_limit_per_min;
+
+    const scopeSet = new Set(key.scopes || []);
+    document.querySelectorAll('input[name="edit-scopes"]').forEach(cb => {
+        cb.checked = scopeSet.has(cb.value);
+    });
+
+    document.getElementById("edit-key-modal").classList.remove("hidden");
+};
+
+window.adminRegenerateSecret = async function(clientId) {
+    if (!state.adminToken) return;
+    if (!confirm(`Regenerate the secret for '${clientId}'? The old secret will stop working immediately.`)) return;
+
+    logToTerminal(`Admin: Regenerating secret for '${clientId}'...`);
+
+    try {
+        const res = await fetch(`${state.apiBase}/v1/admin/keys/${clientId}/regenerate-secret`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${state.adminToken}` }
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || "Failed to regenerate secret");
+        }
+
+        const data = await res.json();
+
+        document.getElementById("reveal-client-id").value = data.client_id;
+        document.getElementById("reveal-client-secret").value = data.client_secret;
+        document.getElementById("secret-reveal-modal").classList.remove("hidden");
+
+        logToTerminal(`Admin: Secret regenerated for '${clientId}'.`);
+    } catch (err) {
+        logToTerminal(`Admin Error: ${err.message}`, "error-log");
+        alert(err.message);
+    }
+};
 
 window.adminKeyAction = async function(clientId, action) {
     if (!state.adminToken) return;
