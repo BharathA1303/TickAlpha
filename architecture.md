@@ -44,7 +44,7 @@ graph TD
 
 ## 2. Database Schema
 
-The database is built on **PostgreSQL** to handle historical end-of-day (EOD) data points, administrative keys, and audit logs. The models are defined in [models.py](file:///d:/VIANMAX%20DEV%20TEAM/Dedicated%20Data%20Layer/app/db/models.py).
+The database is built on **PostgreSQL** to handle historical end-of-day (EOD) data points, administrative keys, and audit logs. The models are defined in [models.py](app/db/models.py).
 
 ### A. `price_data` Table
 Stores historical daily end-of-day stock OHLCV records for Equities, F&O derivatives, and Commodities.
@@ -63,14 +63,18 @@ Stores historical daily end-of-day stock OHLCV records for Equities, F&O derivat
 *   **Constraints**: Unique constraint on `(symbol, exchange, segment, expiry, strike, option_type, market_timestamp)` to prevent duplicate records.
 
 ### B. `api_keys` Table
-Stores authorized developer client profiles and hashed secrets.
+Stores authorized developer client profiles and hashed secrets. Managed exclusively via the Admin Console (gated behind an admin login, `admin1`/`pass001` by default).
 *   `id` (Integer, Primary Key)
 *   `client_id` (String, Unique Index) - Public credentials identifier
 *   `secret_hash` (String) - SHA-256 hash of the private secret key
 *   `owner` (String) - Reference tag (e.g. `alphasync-website`)
+*   `name` (String) - Optional human-readable label for the key
 *   `scopes` (String Array) - Array of authorized scopes (e.g. `['nse:eq', 'nse:opt', 'admin']`)
+*   `allowed_symbols` (String Array) - Optional symbol allowlist (`EXCHANGE:SEGMENT:SYMBOL`). Empty = all symbols within granted scopes.
+*   `max_replay_speed` (Integer) - Maximum tick playback speed multiplier (1x-60x) this key may request for replay sessions
 *   `rate_limit_per_min` (Integer) - API request limit
-*   `is_active` (Boolean) - Quick disable flag
+*   `is_active` (Boolean) - Derived from `status`; `False` when paused, disabled, or deleted
+*   `status` (String) - One of `active`, `paused`, `disabled`, `deleted` (soft-delete; deleted keys are hidden but retained for audit)
 
 ### C. `ingestion_log` Table
 Audits EOD bhavcopy ingestion cycles.
@@ -85,7 +89,7 @@ Audits EOD bhavcopy ingestion cycles.
 
 ## 3. Compliance Delay Gate
 
-The compliance gate is a centralized filter block in [delay_gate.py](file:///d:/VIANMAX%20DEV%20TEAM/Dedicated%20Data%20Layer/app/core/delay_gate.py) that strictly enforces a rolling **3-day delay cutoff**.
+The compliance gate is a centralized filter block in [delay_gate.py](app/core/delay_gate.py) that strictly enforces a rolling **3-day delay cutoff**.
 
 ### Design Decisions
 1.  **Zone-aware boundaries**: The cutoff calculation converts the system clock into Indian Standard Time (IST / `Asia/Kolkata`) prior to calculating the rolling threshold, ensuring that timezone offsets cannot bypass the delay rules.
@@ -99,7 +103,7 @@ The compliance gate is a centralized filter block in [delay_gate.py](file:///d:/
 Since this is a delayed compliance gateway, the service does not connect to real-time live trading multicast sockets. Instead, it features a **real-time tick simulation engine** to recreate high-frequency market updates.
 
 ### Brownian Bridge Algorithm
-The tick path simulator ([brownian_bridge.py](file:///d:/VIANMAX%20DEV%20TEAM/Dedicated%20Data%20Layer/app/simulator/brownian_bridge.py)) takes a stock's historical EOD `open`, `high`, `low`, and `close` prices for a date, and generates a realistic 22,500-tick intraday path.
+The tick path simulator ([brownian_bridge.py](app/simulator/brownian_bridge.py)) takes a stock's historical EOD `open`, `high`, `low`, and `close` prices for a date, and generates a realistic 22,500-tick intraday path.
 *   **Formula**:
     $$W_{bridge}(t) = W_t - \frac{t}{T} W_T + P_{start} + \frac{t}{T}(P_{end} - P_{start})$$
     where $W_t$ is standard Brownian motion (with scaling volatility).

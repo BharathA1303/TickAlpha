@@ -83,13 +83,17 @@ This deploys the following services:
 
 ## 🔑 Security & Key Management
 
-Access to the API requires a signed JWT token, generated via a Client ID and Client Secret. 
+Access to the API requires a signed JWT token, generated via a Client ID and Client Secret.
 
-### Generating a Developer API Key
-To register a client application and print the raw credentials, execute the CLI tool inside your running API container:
+### Admin Console (Recommended)
+API keys are managed through the built-in Admin Console in the developer portal frontend. The entire portal is gated behind an admin login (`admin1` / `pass001` by default — configurable via `ADMIN_USERNAME`/`ADMIN_PASSWORD`). After logging in, the admin can create keys with per-key scopes, an optional symbol allowlist, a max tick replay speed cap, and a rate limit — and can pause, resume, disable, or delete any key at any time from the same screen.
+
+### Generating a Developer API Key via CLI (Alternative)
+To register a client application and print the raw credentials from the command line instead:
 ```bash
 docker-compose exec api python scripts/generate_api_key.py --owner "alphasync-website" --scopes "nse:eq,bse:eq,nse:fut,nse:opt,mcx:fut,admin" --rate-limit 120
 ```
+*Note: the CLI tool does not currently support setting `allowed_symbols` or `max_replay_speed` — use the Admin Console for full control over those fields.*
 
 > [!WARNING]
 > Copy the generated Client Secret immediately from the console output. It is stored as a SHA-256 hash in the database and **cannot be retrieved again**.
@@ -130,5 +134,5 @@ pytest -v
 
 ## 📖 API Documentation & Integration
 
-*   To learn how to integrate this backend with your own custom websites, trading bots, or mobile apps, see the comprehensive [api_integration_guide.md](file:///d:/VIANMAX%20DEV%20TEAM%20/Dedicated%20Data%20Layer/api_integration_guide.md).
-*   For details on the system design and math implementation, see [architecture.md](file:///d:/VIANMAX%20DEV%20TEAM/Dedicated%20Data%20Layer/architecture.md).
+*   To learn how to integrate this backend with your own custom websites, trading bots, or mobile apps, see the comprehensive [api_integration_guide.md](api_integration_guide.md).
+*   For details on the system design and math implementation, see [architecture.md](architecture.md).
