@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: alphasync-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: alphasync_user
+      POSTGRES_PASSWORD: alphasync_password
+      POSTGRES_DB: alphasync_data
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alphasync_user -d alphasync_data"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: alphasync-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    container_name: alphasync-api
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_USER=alphasync_user
+      - POSTGRES_PASSWORD=alphasync_password
+      - POSTGRES_DB=alphasync_data
+      - REDIS_HOST=redis
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=info
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+
+volumes:
+  postgres_data:

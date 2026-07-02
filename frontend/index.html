@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AlphaSync Developer Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <span class="brand-logo">Δ</span>
+                <h2 class="brand-name">AlphaSync</h2>
+                <span class="badge">Data Layer</span>
+            </div>
+            
+            <nav class="nav-menu">
+                <a href="#auth" class="nav-item active" id="nav-auth">
+                    <span class="icon">🔑</span> Authenticate
+                </a>
+                <a href="#admin" class="nav-item" id="nav-admin">
+                    <span class="icon">⚙️</span> Admin Portal
+                </a>
+                <a href="#sessions" class="nav-item" id="nav-sessions">
+                    <span class="icon">⏳</span> Replay Sessions
+                </a>
+                <a href="#live-feed" class="nav-item" id="nav-feed">
+                    <span class="icon">📈</span> Live Tick Stream
+                </a>
+                <a href="#history" class="nav-item" id="nav-history">
+                    <span class="icon">📚</span> Historical Data
+                </a>
+            </nav>
+            
+            <div class="system-status">
+                <div class="status-indicator online"></div>
+                <div class="status-text">
+                    <p class="status-title">System Status</p>
+                    <p class="status-desc" id="api-health">Checking server...</p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <header class="top-header">
+                <h1 id="page-title">Developer Credentials</h1>
+                <div class="auth-badge" id="token-status">
+                    <span class="indicator red"></span>
+                    <span class="text">No Active Session Token</span>
+                </div>
+            </header>
+
+            <div class="content-wrapper">
+                <!-- Section 1: Authentication -->
+                <section id="section-auth" class="tab-content active">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Connect to Data Layer</h3>
+                            <p>Enter your Client ID and Client Secret to authenticate and retrieve a secure JWT session token.</p>
+                        </div>
+                        <div class="card-body">
+                            <form id="auth-form">
+                                <div class="form-group">
+                                    <label for="client-id">Client ID (API Key)</label>
+                                    <input type="text" id="client-id" placeholder="e.g. client_..." required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="client-secret">Client Secret</label>
+                                    <input type="password" id="client-secret" placeholder="e.g. secret_..." required>
+                                </div>
+                                <button type="submit" class="btn primary-btn">Generate Access Token</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card token-card hidden" id="jwt-display-card">
+                        <div class="card-header">
+                            <h3>Active JWT Access Token</h3>
+                            <span class="token-expiry" id="token-expires-in">Expires in: 3600s</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="code-block-container">
+                                <pre><code id="jwt-token-string"></code></pre>
+                                <button class="btn secondary-btn copy-btn" id="copy-jwt-btn">Copy Token</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 1B: Admin Portal Credentials Generator -->
+                <section id="section-admin" class="tab-content">
+                    <div class="grid-2col">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Generate Client Credentials</h3>
+                                <p>Generate a new API Client ID and Secret key pair. Secret hashes will be stored securely in the database.</p>
+                            </div>
+                            <div class="card-body">
+                                <form id="admin-key-form">
+                                    <div class="form-group">
+                                        <label for="admin-owner">Client/Owner Name</label>
+                                        <input type="text" id="admin-owner" placeholder="e.g. trading-bot-1" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Scopes</label>
+                                        <div class="checkbox-group">
+                                            <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="nse:eq" checked> NSE Cash Equities (nse:eq)</label>
+                                            <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="bse:eq" checked> BSE Cash Equities (bse:eq)</label>
+                                            <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="nse:fut" checked> NSE Futures (nse:fut)</label>
+                                            <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="nse:opt" checked> NSE Options (nse:opt)</label>
+                                            <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="mcx:fut" checked> MCX Commodities (mcx:fut)</label>
+                                            <label class="checkbox-label"><input type="checkbox" name="admin-scopes" value="admin"> Admin Operations (admin)</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="admin-rate-limit">Rate Limit (requests/min)</label>
+                                        <input type="number" id="admin-rate-limit" value="60" min="1" max="1000" required>
+                                    </div>
+                                    <button type="submit" class="btn primary-btn">Create API Keys</button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="card token-card hidden" id="generated-keys-card">
+                            <div class="card-header">
+                                <h3>Generated Client API Credentials</h3>
+                                <p class="text-warning" style="margin-top: 4px; font-weight: 500;">⚠️ COPY THE SECRET KEY NOW. It will NEVER be shown again.</p>
+                            </div>
+                            <div class="card-body">
+                                <div class="credentials-display">
+                                    <div class="form-group">
+                                        <label>Client ID (API Key)</label>
+                                        <div class="copyable-field">
+                                            <input type="text" id="generated-client-id" readonly style="width: 100%;">
+                                            <button class="btn btn-sm secondary-btn" id="btn-copy-gen-id" style="margin-top: 4px;">Copy</button>
+                                        </div>
+                                    </div>
+                                    <div class="form-group" style="margin-top: 16px;">
+                                        <label>Client Secret</label>
+                                        <div class="copyable-field">
+                                            <input type="text" id="generated-client-secret" readonly style="width: 100%;">
+                                            <button class="btn btn-sm secondary-btn" id="btn-copy-gen-secret" style="margin-top: 4px;">Copy</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 2: Replay Sessions -->
+                <section id="section-sessions" class="tab-content">
+                    <div class="grid-2col">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Create Replay Session</h3>
+                                <p>Initiate a virtual market replay session on a historical date. All data is subject to the rolling compliance gate.</p>
+                            </div>
+                            <div class="card-body">
+                                <form id="session-form">
+                                    <div class="form-group">
+                                        <label for="session-date">Replay Date</label>
+                                        <input type="date" id="session-date" required>
+                                        <small class="helper-text text-warning">Compliance: Date must be at least 3 days ago.</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="session-speed">Replay Speed Multiplier</label>
+                                        <select id="session-speed">
+                                            <option value="1">1x (Real-time speed)</option>
+                                            <option value="2">2x speed</option>
+                                            <option value="5">5x speed</option>
+                                            <option value="10">10x speed</option>
+                                            <option value="30">30x speed</option>
+                                            <option value="60">60x (1 minute per second)</option>
+                                        </select>
+                                    </div>
+                                    <button type="submit" class="btn primary-btn">Launch Replay Session</button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Active Session State</h3>
+                                <p>Monitor and control the clock of your currently selected virtual replay session.</p>
+                            </div>
+                            <div class="card-body" id="session-state-container">
+                                <div class="empty-state">
+                                    <p>No session launched yet. Use the form to start a replay session.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 3: Live Tick Stream & Chart -->
+                <section id="section-live-feed" class="tab-content">
+                    <div class="live-stream-grid">
+                        <div class="chart-column">
+                            <div class="card chart-card">
+                                <div class="chart-header">
+                                    <div class="instrument-info">
+                                        <h3 id="chart-symbol">Select an Instrument</h3>
+                                        <span class="badge" id="chart-exchange">NONE</span>
+                                        <span class="virtual-clock" id="chart-clock">09:15:00</span>
+                                    </div>
+                                    <div class="session-actions">
+                                        <button class="btn btn-sm" id="btn-chart-play" disabled>Play</button>
+                                        <button class="btn btn-sm" id="btn-chart-pause" disabled>Pause</button>
+                                    </div>
+                                </div>
+                                <div class="card-body chart-body split-chart-layout">
+                                    <div class="tickers-sidebar" id="active-tickers-sidebar">
+                                        <p class="sidebar-title">Session Instruments</p>
+                                        <div class="tickers-list" id="tickers-list-container">
+                                            <div class="ticker-item empty">No active subscriptions</div>
+                                        </div>
+                                    </div>
+                                    <div class="chart-container">
+                                        <canvas id="tick-chart" width="580" height="350"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3>Instrument Subscription</h3>
+                                </div>
+                                <div class="card-body">
+                                    <form id="subscribe-form" class="inline-form">
+                                        <div class="form-group flex-grow">
+                                            <label for="sub-symbol">Symbol Specification</label>
+                                            <input type="text" id="sub-symbol" placeholder="e.g. NSE:EQ:RELIANCE or MCX:FUT:GOLD" required>
+                                        </div>
+                                        <button type="submit" class="btn primary-btn" id="btn-subscribe" disabled>Subscribe</button>
+                                    </form>
+                                    
+                                    <div class="quick-bulk-actions">
+                                        <button class="btn btn-sm secondary-btn bulk-btn" id="btn-sub-all-nse" disabled>Subscribe All NSE (EQ)</button>
+                                        <button class="btn btn-sm secondary-btn bulk-btn" id="btn-sub-all-mcx" disabled>Subscribe All MCX (FUT)</button>
+                                        <button class="btn btn-sm secondary-btn bulk-btn" id="btn-sub-all-global" disabled>Subscribe All Assets</button>
+                                    </div>
+                                    
+                                    <div class="subscriptions-list-container" style="margin-top: 24px;">
+                                        <p class="section-subtitle">Active Subscriptions in Session</p>
+                                        <div id="active-subscriptions-chips">
+                                            <span class="chip-empty">No active subscriptions</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="log-column">
+                            <div class="card log-card">
+                                <div class="card-header">
+                                    <h3>Raw Tick Stream Log</h3>
+                                    <button class="btn btn-sm secondary-btn" id="btn-clear-logs">Clear</button>
+                                </div>
+                                <div class="card-body log-body" id="tick-log-terminal">
+                                    <div class="log-entry system-log">Waiting for WebSocket connection...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 4: Historical Data Range queries -->
+                <section id="section-history" class="tab-content">
+                    <div class="grid-2col">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Query Historical Data</h3>
+                                <p>Perform standard REST-based range queries to fetch gated daily EOD data points.</p>
+                            </div>
+                            <div class="card-body">
+                                <form id="history-form">
+                                    <div class="form-group">
+                                        <label for="hist-symbol">Symbol Spec</label>
+                                        <input type="text" id="hist-symbol" placeholder="e.g. RELIANCE" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="hist-exchange">Exchange</label>
+                                        <select id="hist-exchange">
+                                            <option value="NSE">NSE (National Stock Exchange)</option>
+                                            <option value="BSE">BSE (Bombay Stock Exchange)</option>
+                                            <option value="MCX">MCX (Multi Commodity Exchange)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="hist-segment">Segment</label>
+                                        <select id="hist-segment">
+                                            <option value="EQ">EQ (Cash Equities)</option>
+                                            <option value="FUT">FUT (Futures Contracts)</option>
+                                            <option value="OPT">OPT (Option Contracts)</option>
+                                        </select>
+                                    </div>
+                                    <div class="grid-2col-nested">
+                                        <div class="form-group">
+                                            <label for="hist-start">Start Date</label>
+                                            <input type="date" id="hist-start" required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="hist-end">End Date</label>
+                                            <input type="date" id="hist-end" required>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn primary-btn">Execute Range Query</button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Query Output</h3>
+                                <span class="badge" id="history-query-status">IDLE</span>
+                            </div>
+                            <div class="card-body output-body">
+                                <pre><code id="history-json-output">{ "message": "Execute a query to retrieve historical EOD price ranges." }</code></pre>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>

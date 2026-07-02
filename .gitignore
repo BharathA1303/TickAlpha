@@ -1,0 +1,161 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Pyinstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nosenv/
+.pytest_cache/
+. Moffat/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.run/
+
+# Translations
+*.mo
+*.gmo
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+#   For a library or package, you might want to ignore these files since the values may not match the developer's system.
+# .python-version
+
+# pipenv
+#   According to pypa/pipenv#1013, pipenv should ignore the Lockfile.
+#   Anyway, for an application, you should keep Pipfile.lock in the git repo.
+#Pipfile.lock
+
+# poetry
+#   Similar to Pipfile.lock, poetry.lock should be kept in the git repo.
+#poetry.lock
+
+# pdm
+#   Similar to Pipfile.lock, pdm.lock should be kept in the git repo.
+#pdm.lock
+
+# virtualenv
+.venv/
+venv/
+ENV/
+env/
+active_env/
+active_env.bat
+python/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype type checker
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Environment variables (contains private credentials)
+.env
+.env.local
+
+# Local application data / database cache folders
+data/archive/
+pgdata/
+postgres_data/
+
+# IDE settings
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Scratch scripts/temporary development files
+scratch/
+check_keys.py
+check_db_data.py
+check_prices.py
+check_symbols.py
+check_date_counts.py
+get_session_details.py
+test_download.py
+test_unzip.py
+test_speed.py
