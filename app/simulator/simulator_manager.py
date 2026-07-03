@@ -37,6 +37,9 @@ class SimulatorManager:
         self.market_start_secs = time_to_seconds(START_TIME_STR)
         self.market_close_secs = time_to_seconds("15:30:00")
 
+        # Max sessions advanced concurrently per 1s tick (load protection).
+        self.MAX_CONCURRENT_SESSIONS = 50
+
     async def start(self):
         """Starts the background simulation loop."""
         if self.is_running:
@@ -109,6 +112,21 @@ class SimulatorManager:
             for q in self.listeners[session_id]:
                 try:
                     q.put_nowait(message)
+                except asyncio.QueueFull:
+                    # Load protection / backpressure: this client is consuming
+                    # slower than we produce. Rather than blocking every other
+                    # client (or growing memory unbounded), drop this client's
+                    # oldest buffered batch and enqueue the newest one so it
+                    # keeps receiving current ticks and self-recovers.
+                    try:
+                        q.get_nowait()
+                        q.task_done()
+                    except Exception:
+                        pass
+                    try:
+                        q.put_nowait(message)
+                    except Exception:
+                        dead_queues.add(q)
                 except Exception:
                     dead_queues.add(q)
             if dead_queues:
@@ -209,16 +227,33 @@ class SimulatorManager:
                             except Exception:
                                 pass
                 
-                # Advance and publish ticks for each active session
+                # Advance and publish ticks for each active session.
+                # Bound concurrency so a spike in active sessions can't launch
+                # an unbounded number of heavy coroutines at once and starve /
+                # crash the event loop. Sessions beyond the limit are processed
+                # in the next batch — the virtual clock catches up naturally.
                 if active_ids:
-                    tasks = [self.process_active_session(sid) for sid in active_ids]
+                    sem = asyncio.Semaphore(self.MAX_CONCURRENT_SESSIONS)
+
+                    async def _guarded(sid: str):
+                        async with sem:
+                            await self.process_active_session(sid)
+
+                    tasks = [_guarded(sid) for sid in active_ids]
                     await asyncio.gather(*tasks, return_exceptions=True)
-                    
+
             except Exception as e:
                 logger.error(f"Error in simulation loop: {e}")
-                
-            # Keep loop exactly at 1-second ticks
+
+            # Keep loop at ~1-second ticks. If a heavy batch overruns the
+            # budget, log it (a signal the server is under-provisioned for the
+            # current load) and continue without stacking work.
             elapsed = time_module.monotonic() - start_time
+            if elapsed > 1.0:
+                logger.warning(
+                    f"Simulation loop overran budget: {elapsed:.2f}s for "
+                    f"{len(active_ids)} active session(s)"
+                )
             sleep_time = max(0.01, 1.0 - elapsed)
             await asyncio.sleep(sleep_time)
 

@@ -46,8 +46,13 @@ async def websocket_feed(
     # 4. Subscribe to the updates feed (Redis Pub/Sub or In-memory Queue)
     from app.simulator.simulator_manager import simulator_manager
     
-    # Register local in-memory queue for this connection
-    local_queue = asyncio.Queue()
+    # Register a *bounded* local in-memory queue for this connection. A bound is
+    # critical for load protection: if a browser consumes slowly (or stalls),
+    # an unbounded queue would grow until the server runs out of memory and
+    # crashes. With a bound, the publisher sheds the oldest tick batch for this
+    # one slow client (see SimulatorManager.publish_to_session) instead of
+    # taking the whole process down.
+    local_queue = asyncio.Queue(maxsize=256)
     if session_id not in simulator_manager.listeners:
         simulator_manager.listeners[session_id] = set()
     simulator_manager.listeners[session_id].add(local_queue)
