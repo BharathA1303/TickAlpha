@@ -48,18 +48,6 @@
                 <a href="#admin" class="nav-item active" id="nav-admin">
                     <span class="icon">⚙️</span> Admin Portal
                 </a>
-                <a href="#auth" class="nav-item" id="nav-auth">
-                    <span class="icon">🔑</span> Authenticate
-                </a>
-                <a href="#sessions" class="nav-item" id="nav-sessions">
-                    <span class="icon">⏳</span> Replay Sessions
-                </a>
-                <a href="#live-feed" class="nav-item" id="nav-feed">
-                    <span class="icon">📈</span> Live Tick Stream
-                </a>
-                <a href="#history" class="nav-item" id="nav-history">
-                    <span class="icon">📚</span> Historical Data
-                </a>
                 <a href="sandbox.html" target="_blank" class="nav-item" style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 8px;">
                     <span class="icon">⚡</span> Sandbox Tester
                 </a>
@@ -79,49 +67,13 @@
             <header class="top-header">
                 <h1 id="page-title">Admin Portal</h1>
                 <div class="auth-badge" id="token-status">
-                    <span class="indicator red"></span>
-                    <span class="text">No Active Session Token</span>
+                    <span class="indicator green"></span>
+                    <span class="text">Admin Session Active</span>
                 </div>
             </header>
 
             <div class="content-wrapper">
-                <!-- Section 1: Authentication (client API key -> JWT, for testing replay sessions) -->
-                <section id="section-auth" class="tab-content">
-                    <div class="card">
-                        <div class="card-header">
-                            <h3>Connect to Data Layer</h3>
-                            <p>Enter a Client ID and Client Secret to authenticate and retrieve a secure JWT session token.</p>
-                        </div>
-                        <div class="card-body">
-                            <form id="auth-form">
-                                <div class="form-group">
-                                    <label for="client-id">Client ID (API Key)</label>
-                                    <input type="text" id="client-id" placeholder="e.g. client_..." required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="client-secret">Client Secret</label>
-                                    <input type="password" id="client-secret" placeholder="e.g. secret_..." required>
-                                </div>
-                                <button type="submit" class="btn primary-btn">Generate Access Token</button>
-                            </form>
-                        </div>
-                    </div>
-
-                    <div class="card token-card hidden" id="jwt-display-card">
-                        <div class="card-header">
-                            <h3>Active JWT Access Token</h3>
-                            <span class="token-expiry" id="token-expires-in">Expires in: 3600s</span>
-                        </div>
-                        <div class="card-body">
-                            <div class="code-block-container">
-                                <pre><code id="jwt-token-string"></code></pre>
-                                <button class="btn secondary-btn copy-btn" id="copy-jwt-btn">Copy Token</button>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Section 1B: Admin Portal (accessible only after the admin login gate is passed) -->
+                <!-- Admin Portal (accessible only after the admin login gate is passed) -->
                 <section id="section-admin" class="tab-content active">
                     <div id="admin-console">
                         <div class="grid-2col">
@@ -232,179 +184,6 @@
                     </div>
                 </section>
 
-                <!-- Section 2: Replay Sessions -->
-                <section id="section-sessions" class="tab-content">
-                    <div class="grid-2col">
-                        <div class="card">
-                            <div class="card-header">
-                                <h3>Create Replay Session</h3>
-                                <p>Initiate a virtual market replay session on a historical date. All data is subject to the rolling compliance gate.</p>
-                            </div>
-                            <div class="card-body">
-                                <form id="session-form">
-                                    <div class="form-group">
-                                        <label for="session-date">Replay Date</label>
-                                        <input type="date" id="session-date" required>
-                                        <small class="helper-text text-warning">Compliance: Date must be at least 3 days ago.</small>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="session-speed">Replay Speed Multiplier</label>
-                                        <select id="session-speed">
-                                            <option value="1">1x (Real-time speed)</option>
-                                            <option value="2">2x speed</option>
-                                            <option value="5">5x speed</option>
-                                            <option value="10">10x speed</option>
-                                            <option value="30">30x speed</option>
-                                            <option value="60">60x (1 minute per second)</option>
-                                        </select>
-                                    </div>
-                                    <button type="submit" class="btn primary-btn">Launch Replay Session</button>
-                                </form>
-                            </div>
-                        </div>
-
-                        <div class="card">
-                            <div class="card-header">
-                                <h3>Active Session State</h3>
-                                <p>Monitor and control the clock of your currently selected virtual replay session.</p>
-                            </div>
-                            <div class="card-body" id="session-state-container">
-                                <div class="empty-state">
-                                    <p>No session launched yet. Use the form to start a replay session.</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Section 3: Live Tick Stream & Chart -->
-                <section id="section-live-feed" class="tab-content">
-                    <div class="live-stream-grid">
-                        <div class="chart-column">
-                            <div class="card chart-card">
-                                <div class="chart-header">
-                                    <div class="instrument-info">
-                                        <h3 id="chart-symbol">Select an Instrument</h3>
-                                        <span class="badge" id="chart-exchange">NONE</span>
-                                        <span class="virtual-clock" id="chart-clock">09:15:00</span>
-                                    </div>
-                                    <div class="session-actions">
-                                        <button class="btn btn-sm" id="btn-chart-play" disabled>Play</button>
-                                        <button class="btn btn-sm" id="btn-chart-pause" disabled>Pause</button>
-                                    </div>
-                                </div>
-                                <div class="card-body chart-body split-chart-layout">
-                                    <div class="tickers-sidebar" id="active-tickers-sidebar">
-                                        <p class="sidebar-title">Session Instruments</p>
-                                        <div class="tickers-list" id="tickers-list-container">
-                                            <div class="ticker-item empty">No active subscriptions</div>
-                                        </div>
-                                    </div>
-                                    <div class="chart-container">
-                                        <canvas id="tick-chart" width="580" height="350"></canvas>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="card">
-                                <div class="card-header">
-                                    <h3>Instrument Subscription</h3>
-                                </div>
-                                <div class="card-body">
-                                    <form id="subscribe-form" class="inline-form">
-                                        <div class="form-group flex-grow">
-                                            <label for="sub-symbol">Symbol Specification</label>
-                                            <input type="text" id="sub-symbol" placeholder="e.g. NSE:EQ:RELIANCE or MCX:FUT:GOLD" required>
-                                        </div>
-                                        <button type="submit" class="btn primary-btn" id="btn-subscribe" disabled>Subscribe</button>
-                                    </form>
-                                    
-                                    <div class="quick-bulk-actions">
-                                        <button class="btn btn-sm secondary-btn bulk-btn" id="btn-sub-all-nse" disabled>Subscribe All NSE (EQ)</button>
-                                        <button class="btn btn-sm secondary-btn bulk-btn" id="btn-sub-all-mcx" disabled>Subscribe All MCX (FUT)</button>
-                                        <button class="btn btn-sm secondary-btn bulk-btn" id="btn-sub-all-global" disabled>Subscribe All Assets</button>
-                                    </div>
-                                    
-                                    <div class="subscriptions-list-container" style="margin-top: 24px;">
-                                        <p class="section-subtitle">Active Subscriptions in Session</p>
-                                        <div id="active-subscriptions-chips">
-                                            <span class="chip-empty">No active subscriptions</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="log-column">
-                            <div class="card log-card">
-                                <div class="card-header">
-                                    <h3>Raw Tick Stream Log</h3>
-                                    <button class="btn btn-sm secondary-btn" id="btn-clear-logs">Clear</button>
-                                </div>
-                                <div class="card-body log-body" id="tick-log-terminal">
-                                    <div class="log-entry system-log">Waiting for WebSocket connection...</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Section 4: Historical Data Range queries -->
-                <section id="section-history" class="tab-content">
-                    <div class="grid-2col">
-                        <div class="card">
-                            <div class="card-header">
-                                <h3>Query Historical Data</h3>
-                                <p>Perform standard REST-based range queries to fetch gated daily EOD data points.</p>
-                            </div>
-                            <div class="card-body">
-                                <form id="history-form">
-                                    <div class="form-group">
-                                        <label for="hist-symbol">Symbol Spec</label>
-                                        <input type="text" id="hist-symbol" placeholder="e.g. RELIANCE" required>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="hist-exchange">Exchange</label>
-                                        <select id="hist-exchange">
-                                            <option value="NSE">NSE (National Stock Exchange)</option>
-                                            <option value="BSE">BSE (Bombay Stock Exchange)</option>
-                                            <option value="MCX">MCX (Multi Commodity Exchange)</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="hist-segment">Segment</label>
-                                        <select id="hist-segment">
-                                            <option value="EQ">EQ (Cash Equities)</option>
-                                            <option value="FUT">FUT (Futures Contracts)</option>
-                                            <option value="OPT">OPT (Option Contracts)</option>
-                                        </select>
-                                    </div>
-                                    <div class="grid-2col-nested">
-                                        <div class="form-group">
-                                            <label for="hist-start">Start Date</label>
-                                            <input type="date" id="hist-start" required>
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="hist-end">End Date</label>
-                                            <input type="date" id="hist-end" required>
-                                        </div>
-                                    </div>
-                                    <button type="submit" class="btn primary-btn">Execute Range Query</button>
-                                </form>
-                            </div>
-                        </div>
-
-                        <div class="card">
-                            <div class="card-header">
-                                <h3>Query Output</h3>
-                                <span class="badge" id="history-query-status">IDLE</span>
-                            </div>
-                            <div class="card-body output-body">
-                                <pre><code id="history-json-output">{ "message": "Execute a query to retrieve historical EOD price ranges." }</code></pre>
-                            </div>
-                        </div>
-                    </div>
-                </section>
             </div>
         </main>
     </div>

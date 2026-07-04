@@ -4,16 +4,19 @@ from datetime import date
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from sqlalchemy import select
+
 from app.config import settings
-from app.db.models import Base
-from app.db.session import async_engine
+from app.db.models import Base, PriceData
+from app.db.session import async_engine, AsyncSessionLocal
 from app.core.cache import init_redis, close_redis
 from app.api import routes_price, routes_symbols, routes_admin, routes_auth, routes_sessions, routes_feed
 from app.simulator.simulator_manager import simulator_manager
 
 # Scheduler import
+from datetime import timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from app.ingestion.run_ingestion import ingest_date
+from app.ingestion.run_ingestion import ingest_date, is_trading_day
 
 # Set up logging
 logging.basicConfig(
@@ -25,13 +28,30 @@ logger = logging.getLogger("alphasync-data-layer")
 # Background Scheduler for nightly EOD updates
 scheduler = AsyncIOScheduler()
 
+# How many trailing trading days the nightly job re-checks for gaps
+# (e.g. missed runs during downtime, or a source that was unreachable earlier).
+GAP_CHECK_LOOKBACK_DAYS = 7
+
 async def scheduled_nightly_ingestion():
-    """Runs ingestion for today's data (scheduled daily in the evening)."""
+    """Runs ingestion for today's data, then self-heals any gaps in the last
+    GAP_CHECK_LOOKBACK_DAYS trading days (e.g. missed runs, prior source outages)."""
     today_date = date.today()
     logger.info(f"Triggering scheduled nightly ingestion for {today_date}")
-    # Run against official exchanges (or fallback to seeding logic)
     results = await ingest_date(today_date, use_mock=False)
     logger.info(f"Nightly ingestion results: {results}")
+
+    async with AsyncSessionLocal() as db:
+        for i in range(1, GAP_CHECK_LOOKBACK_DAYS + 1):
+            check_date = today_date - timedelta(days=i)
+            if not is_trading_day(check_date):
+                continue
+            existing = await db.execute(
+                select(PriceData.id).where(PriceData.market_timestamp == check_date).limit(1)
+            )
+            if existing.first() is None:
+                logger.warning(f"Gap detected: no data for {check_date}. Backfilling now.")
+                gap_results = await ingest_date(check_date, use_mock=False)
+                logger.info(f"Gap-fill results for {check_date}: {gap_results}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
