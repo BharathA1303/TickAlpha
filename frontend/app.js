@@ -332,6 +332,20 @@ function initForms() {
         });
     });
 
+    document.getElementById("btn-test-sandbox").addEventListener("click", (e) => {
+        e.preventDefault();
+        const clientId = document.getElementById("generated-client-id").value;
+        const clientSecret = document.getElementById("generated-client-secret").value;
+        window.open(`sandbox.html?client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}`, '_blank');
+    });
+
+    document.getElementById("btn-test-reveal-sandbox").addEventListener("click", (e) => {
+        e.preventDefault();
+        const clientId = document.getElementById("reveal-client-id").value;
+        const clientSecret = document.getElementById("reveal-client-secret").value;
+        window.open(`sandbox.html?client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}`, '_blank');
+    });
+
     // 2. Create Session Form
     document.getElementById("session-form").addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -1029,6 +1043,7 @@ function renderKeyRow(key) {
             <td>${key.max_replay_speed}x</td>
             <td><span class="status-pill ${key.status}">${key.status}</span></td>
             <td class="key-actions">
+                <button class="btn btn-sm secondary-btn" style="color: #6366f1; border-color: rgba(99, 102, 241, 0.4);" onclick="testKeyInSandbox('${key.client_id}')">Test</button>
                 <button class="btn btn-sm secondary-btn" onclick="openEditKeyModal('${key.client_id}')">Edit</button>
                 <button class="btn btn-sm secondary-btn" onclick="adminRegenerateSecret('${key.client_id}')">Regenerate Secret</button>
                 ${pauseResumeBtn}
@@ -1038,6 +1053,10 @@ function renderKeyRow(key) {
         </tr>
     `;
 }
+
+window.testKeyInSandbox = function(clientId) {
+    window.open(`sandbox.html?client_id=${encodeURIComponent(clientId)}`, '_blank');
+};
 
 window.openEditKeyModal = function(clientId) {
     const key = adminKeysById[clientId];

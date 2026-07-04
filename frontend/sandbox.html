@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AlphaSync API Key Sandbox Tester</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        :root {
+            --bg-darker: #070a10;
+            --accent-purple: #a855f7;
+            --accent-indigo: #6366f1;
+            --glass-bg: rgba(21, 30, 51, 0.6);
+            --glass-border: rgba(35, 47, 78, 0.7);
+        }
+
+        body {
+            background-color: var(--bg-darker);
+            background-image: radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.05) 0%, transparent 40%),
+                              radial-gradient(circle at 90% 80%, rgba(168, 85, 247, 0.05) 0%, transparent 40%);
+        }
+
+        .sandbox-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 32px 24px;
+        }
+
+        .sandbox-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 32px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .sandbox-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .sandbox-title {
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--text-primary) 30%, #a5b4fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .sandbox-nav-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            color: var(--text-secondary);
+            font-weight: 500;
+            transition: color 0.2s ease;
+            font-size: 14px;
+        }
+
+        .sandbox-nav-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .grid-layout {
+            display: grid;
+            grid-template-columns: 380px 1fr;
+            gap: 24px;
+            align-items: start;
+        }
+
+        @media (max-width: 1024px) {
+            .grid-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            transition: border-color 0.2s ease;
+        }
+
+        .glass-card:hover {
+            border-color: rgba(99, 102, 241, 0.3);
+        }
+
+        .card-title-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+        }
+
+        .card-subtitle {
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 20px;
+        }
+
+        /* Status Badge Styling */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(35, 47, 78, 0.4);
+            border: 1px solid var(--border-color);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--text-secondary);
+            box-shadow: 0 0 8px var(--text-secondary);
+        }
+
+        .status-badge.connected .status-dot {
+            background-color: var(--accent-success);
+            box-shadow: 0 0 10px var(--accent-success);
+        }
+
+        .status-badge.verifying .status-dot {
+            background-color: var(--accent-warning);
+            box-shadow: 0 0 10px var(--accent-warning);
+            animation: pulse-warn 1.5s infinite;
+        }
+
+        .status-badge.failed .status-dot {
+            background-color: var(--accent-danger);
+            box-shadow: 0 0 10px var(--accent-danger);
+        }
+
+        @keyframes pulse-warn {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.3); opacity: 0.5; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* Scope details */
+        .scopes-display {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 12px;
+        }
+
+        .scope-badge {
+            font-size: 11px;
+            font-weight: 500;
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            color: #a5b4fc;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-family: 'Fira Code', monospace;
+        }
+
+        /* Control Form Elements */
+        .form-group label {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 13px;
+            letter-spacing: 0.3px;
+        }
+
+        .input-group-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-top: 16px;
+        }
+
+        .btn-gradient {
+            background: linear-gradient(135deg, var(--accent-indigo), var(--accent-purple));
+            color: white;
+            border: none;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-gradient:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+            filter: brightness(1.1);
+        }
+
+        .btn-gradient:active:not(:disabled) {
+            transform: translateY(1px);
+        }
+
+        .btn-gradient:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        /* Test Instruments List */
+        .instrument-presets {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 180px;
+            overflow-y: auto;
+            padding-right: 6px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px;
+            background: rgba(10, 14, 23, 0.4);
+        }
+
+        .instrument-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        .instrument-item:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .instrument-item input {
+            cursor: pointer;
+            margin: 0;
+        }
+
+        .instrument-item label {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        .instrument-type-badge {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 1px 5px;
+            border-radius: 4px;
+            background: var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .instrument-type-badge.fo {
+            background: rgba(168, 85, 247, 0.15);
+            color: #d8b4fe;
+            border: 1px solid rgba(168, 85, 247, 0.3);
+        }
+
+        /* Right Dashboard Layout */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 280px;
+            gap: 24px;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .stream-card {
+            display: flex;
+            flex-direction: column;
+            min-height: 520px;
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .clock-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: 'Fira Code', monospace;
+            background: rgba(10, 14, 23, 0.6);
+            border: 1px solid var(--border-color);
+            padding: 6px 14px;
+            border-radius: 8px;
+            color: #38bdf8;
+            font-size: 15px;
+            font-weight: 600;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .clock-icon {
+            animation: rotate-clock 4s linear infinite;
+            display: inline-block;
+        }
+
+        @keyframes rotate-clock {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .chart-container {
+            position: relative;
+            background-color: #0b0f19;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            flex-grow: 1;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 380px;
+        }
+
+        .chart-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Live Prices Sidebar */
+        .price-list-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 480px;
+            overflow-y: auto;
+        }
+
+        .price-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(10, 14, 23, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .price-item:hover, .price-item.active {
+            border-color: var(--primary-color);
+            background: rgba(59, 130, 246, 0.05);
+        }
+
+        .price-item.active {
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.15);
+        }
+
+        .price-sym-block {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .price-sym {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .price-seg-badge {
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            width: max-content;
+        }
+
+        .price-info-block {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 4px;
+        }
+
+        .price-val {
+            font-family: 'Fira Code', monospace;
+            font-weight: 600;
+            font-size: 14px;
+            transition: color 0.1s ease;
+        }
+
+        .price-val.flash-up {
+            color: var(--accent-success) !important;
+            text-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+        }
+
+        .price-val.flash-down {
+            color: var(--accent-danger) !important;
+            text-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+        }
+
+        .price-vol {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        /* Logger Terminal Card */
+        .terminal-card {
+            background-color: #05070c;
+            border: 1px solid #1a2336;
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 24px;
+        }
+
+        .terminal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #1a2336;
+            padding-bottom: 10px;
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .terminal-body {
+            height: 120px;
+            overflow-y: auto;
+            font-family: 'Fira Code', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            color: #a5b4fc;
+            padding-right: 6px;
+        }
+
+        .log-entry {
+            margin-bottom: 4px;
+            word-break: break-all;
+        }
+
+        .log-entry.error {
+            color: var(--accent-danger);
+        }
+
+        .log-entry.success {
+            color: var(--accent-success);
+        }
+
+        .log-entry.warn {
+            color: var(--accent-warning);
+        }
+
+        .log-entry .timestamp {
+            color: #4b5563;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="sandbox-container">
+        <!-- Top Navigation Header -->
+        <header class="sandbox-header">
+            <div class="sandbox-brand">
+                <span class="brand-logo" style="font-size: 28px;">Δ</span>
+                <div>
+                    <h1 class="sandbox-title">API Sandbox Tester</h1>
+                    <p style="color: var(--text-secondary); font-size: 12px; margin-top: 2px;">Simulated High-Resolution Data Stream Environment</p>
+                </div>
+            </div>
+            
+            <a href="index.html" class="sandbox-nav-btn">
+                <span>🏠</span> Return to Admin Console
+            </a>
+        </header>
+
+        <div class="grid-layout">
+            <!-- Left Column: Controls and Parameters -->
+            <aside>
+                <!-- Card 1: API Key Connection & Scope Info -->
+                <div class="glass-card">
+                    <div class="card-title-container">
+                        <h3 style="font-size: 16px;">Key Verification</h3>
+                        <div class="status-badge" id="conn-status-badge">
+                            <span class="status-dot"></span>
+                            <span id="conn-status-text">Disconnected</span>
+                        </div>
+                    </div>
+                    <p class="card-subtitle">Connect your credentials to query active scopes, limits, and authenticate the session creator.</p>
+                    
+                    <form id="key-connect-form">
+                        <div class="form-group">
+                            <label for="client-id">Client ID (API Key)</label>
+                            <input type="text" id="client-id" placeholder="Enter Client ID (client_...)" required style="width: 100%; margin-top: 6px;">
+                        </div>
+                        <div class="form-group" style="margin-top: 14px;">
+                            <label for="client-secret">Client Secret</label>
+                            <input type="password" id="client-secret" placeholder="Enter Client Secret" required style="width: 100%; margin-top: 6px;">
+                        </div>
+                        <button type="submit" class="btn btn-gradient" id="btn-connect" style="width: 100%; margin-top: 20px; font-weight: 600; padding: 12px;">Connect Key</button>
+                    </form>
+
+                    <!-- Key Details (Initially hidden, revealed on verification success) -->
+                    <div id="key-details-container" class="hidden" style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+                        <h4 style="font-size: 13px; color: var(--text-primary); margin-bottom: 8px;">Key Permissions:</h4>
+                        <div class="scopes-display" id="key-scopes-list">
+                            <!-- Populated dynamically -->
+                        </div>
+                        <div style="margin-top: 14px; font-size: 12px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 6px;">
+                            <div>Speed Limit: <strong id="lbl-max-speed" style="color: var(--text-primary)">--</strong></div>
+                            <div>Allowed Symbols: <span id="lbl-allowed-symbols" style="color: var(--text-primary); font-weight: 500;">All symbols</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 2: Replay Settings & Preset Options -->
+                <div class="glass-card hidden" id="session-setup-card">
+                    <div class="card-title-container">
+                        <h3 style="font-size: 16px;">Replay Session Creator</h3>
+                    </div>
+                    <p class="card-subtitle">Select a target trading day and speed. Only dates passing the 3-day rolling compliance gate can be loaded.</p>
+                    
+                    <form id="sandbox-session-form">
+                        <div class="form-group">
+                            <label for="session-date">Trading Date (YYYY-MM-DD)</label>
+                            <input type="date" id="session-date" required style="width: 100%; margin-top: 6px;">
+                            <small class="helper-text text-warning" style="margin-top: 4px; display: block; font-size: 11px;">Must be at least 3 days ago.</small>
+                        </div>
+                        
+                        <div class="form-group" style="margin-top: 14px;">
+                            <label for="session-speed">Replay Speed Multiplier</label>
+                            <select id="session-speed" style="width: 100%; margin-top: 6px;">
+                                <option value="1">1x (Real-time speed)</option>
+                                <option value="5">5x speed</option>
+                                <option value="10">10x speed</option>
+                                <option value="30">30x speed</option>
+                                <option value="60">60x speed</option>
+                            </select>
+                        </div>
+
+                        <!-- Asset Selection -->
+                        <div class="form-group" style="margin-top: 14px;">
+                            <label>Subscribe to Instruments</label>
+                            <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">Select cash stocks or F&O derivatives below:</p>
+                            
+                            <div class="instrument-presets" id="presets-container">
+                                <!-- Cash Equities -->
+                                <div class="instrument-item">
+                                    <input type="checkbox" id="sym-reliance" value="NSE:EQ:RELIANCE" checked>
+                                    <label for="sym-reliance">
+                                        <span>RELIANCE</span>
+                                        <span class="instrument-type-badge">NSE CASH</span>
+                                    </label>
+                                </div>
+                                <div class="instrument-item">
+                                    <input type="checkbox" id="sym-tcs" value="NSE:EQ:TCS" checked>
+                                    <label for="sym-tcs">
+                                        <span>TCS</span>
+                                        <span class="instrument-type-badge">NSE CASH</span>
+                                    </label>
+                                </div>
+                                <div class="instrument-item">
+                                    <input type="checkbox" id="sym-infy" value="NSE:EQ:INFY">
+                                    <label for="sym-infy">
+                                        <span>INFY</span>
+                                        <span class="instrument-type-badge">NSE CASH</span>
+                                    </label>
+                                </div>
+                                <!-- Futures & Options (F&O) -->
+                                <div class="instrument-item">
+                                    <input type="checkbox" id="sym-nifty-fut" value="NSE:FUT:NIFTY">
+                                    <label for="sym-nifty-fut">
+                                        <span>NIFTY Futures</span>
+                                        <span class="instrument-type-badge fo">FUTURES</span>
+                                    </label>
+                                </div>
+                                <div class="instrument-item">
+                                    <input type="checkbox" id="sym-nifty-opt-ce" value="NSE:OPT:NIFTY22000CE">
+                                    <label for="sym-nifty-opt-ce">
+                                        <span>NIFTY 22000 CE</span>
+                                        <span class="instrument-type-badge fo">OPTIONS</span>
+                                    </label>
+                                </div>
+                                <div class="instrument-item">
+                                    <input type="checkbox" id="sym-nifty-opt-pe" value="NSE:OPT:NIFTY22000PE">
+                                    <label for="sym-nifty-opt-pe">
+                                        <span>NIFTY 22000 PE</span>
+                                        <span class="instrument-type-badge fo">OPTIONS</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Manual symbol subscribe -->
+                        <div class="form-group" style="margin-top: 12px;">
+                            <label for="manual-symbol">Manual Symbol Add (optional)</label>
+                            <div style="display: flex; gap: 8px; margin-top: 6px;">
+                                <input type="text" id="manual-symbol" placeholder="EXCHANGE:SEGMENT:SYMBOL" style="flex-grow: 1;">
+                                <button type="button" class="btn secondary-btn" id="btn-add-manual" style="padding: 0 12px;">Add</button>
+                            </div>
+                            <small class="helper-text" style="font-size: 10px;">e.g. MCX:FUT:GOLD or BSE:EQ:SBI</small>
+                        </div>
+
+                        <button type="submit" class="btn btn-gradient" id="btn-start-simulation" style="width: 100%; margin-top: 20px; font-weight: 600; padding: 12px;">⚡ Create & Start Simulation</button>
+                        <button type="button" class="btn secondary-btn hidden" id="btn-stop-simulation" style="width: 100%; margin-top: 20px; font-weight: 600; padding: 12px; color: var(--accent-danger); border-color: rgba(239, 68, 68, 0.4);">⏹ Stop Simulation</button>
+                    </form>
+                </div>
+            </aside>
+
+            <!-- Right Column: Visual Dashboard -->
+            <main>
+                <div class="glass-card stream-card">
+                    <div class="chart-header">
+                        <div>
+                            <h2 style="font-size: 18px;" id="lbl-active-symbol">Live Simulator Chart</h2>
+                            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;" id="lbl-active-spec">Start a simulation to stream live candlestick feeds</p>
+                        </div>
+                        
+                        <!-- Digital Clock -->
+                        <div class="clock-container hidden" id="sandbox-clock-container">
+                            <span class="clock-icon">🕒</span>
+                            <span id="sandbox-clock-val">09:15:00</span>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-grid">
+                        <!-- Chart Area -->
+                        <div class="chart-container" id="sandbox-chart-container">
+                            <!-- Visual chart canvas rendering -->
+                            <canvas class="chart-canvas" id="sandbox-chart-canvas"></canvas>
+                        </div>
+
+                        <!-- Streaming Instruments LTP list -->
+                        <div>
+                            <h3 style="font-size: 13px; font-weight: 600; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary);">ticking LTP Feed</h3>
+                            <div class="price-list-container" id="ltp-feed-list">
+                                <div class="price-item empty" style="justify-content: center; color: var(--text-secondary); font-size: 13px;">No active stream</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- System Log Output terminal -->
+                    <div class="terminal-card">
+                        <div class="terminal-header">
+                            <span>System Logs</span>
+                            <span id="log-connection-type" style="color: #6366f1;">Sandbox Mode</span>
+                        </div>
+                        <div class="terminal-body" id="sandbox-terminal-log">
+                            <div class="log-entry"><span class="timestamp">[--:--:--]</span>Sandbox initialized. Please connect your API key.</div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="sandbox.js"></script>
+</body>
+</html>
