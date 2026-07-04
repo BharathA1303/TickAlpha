@@ -3,7 +3,7 @@ version: '3.8'
 services:
   db:
     image: postgres:15-alpine
-    container_name: alphasync-postgres
+    container_name: tickalpha-postgres
     restart: always
     environment:
       POSTGRES_USER: alphasync_user
@@ -19,7 +19,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: alphasync-redis
+    container_name: tickalpha-redis
     restart: always
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -29,7 +29,7 @@ services:
 
   api:
     build: .
-    container_name: alphasync-api
+    container_name: tickalpha-api
     restart: always
     ports:
       - "0.0.0.0:8003:8000"
@@ -49,6 +49,15 @@ services:
         condition: service_healthy
     volumes:
       - .:/app
+
+  frontend:
+    build: ./frontend
+    container_name: tickalpha-frontend
+    restart: always
+    ports:
+      - "0.0.0.0:3003:80"
+    depends_on:
+      - api
 
 volumes:
   postgres_data:
