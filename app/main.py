@@ -45,11 +45,25 @@ async def scheduled_nightly_ingestion():
             check_date = today_date - timedelta(days=i)
             if not is_trading_day(check_date):
                 continue
-            existing = await db.execute(
-                select(PriceData.id).where(PriceData.market_timestamp == check_date).limit(1)
+            # Check per-segment, not just "any row exists" - a day with only
+            # EQ rows but no FUT/OPT rows is still a real gap (F&O ingestion
+            # can fail independently of cash equities) that "any row" would miss.
+            existing_eq = await db.execute(
+                select(PriceData.id)
+                .where(PriceData.market_timestamp == check_date, PriceData.segment == "EQ")
+                .limit(1)
             )
-            if existing.first() is None:
-                logger.warning(f"Gap detected: no data for {check_date}. Backfilling now.")
+            existing_fo = await db.execute(
+                select(PriceData.id)
+                .where(
+                    PriceData.market_timestamp == check_date,
+                    PriceData.segment.in_(["FUT", "OPT"]),
+                    PriceData.exchange == "NSE",
+                )
+                .limit(1)
+            )
+            if existing_eq.first() is None or existing_fo.first() is None:
+                logger.warning(f"Gap detected: missing EQ and/or NSE F&O data for {check_date}. Backfilling now.")
                 gap_results = await ingest_date(check_date, use_mock=False)
                 logger.info(f"Gap-fill results for {check_date}: {gap_results}")
 

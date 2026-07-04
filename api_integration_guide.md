@@ -26,6 +26,22 @@ If you are integrating this data layer into another platform, here is what you c
 
 ---
 
+## 1b. Asset Coverage: Equities, F&O, and Commodities
+
+The API's authentication/scoping, delay gate, historical range queries, correction/versioning behavior, and tick-by-tick replay simulation all work **identically** across every segment below — a client integrating against `NSE:OPT:RELIANCE` (an options contract) writes the same code as one integrating against `NSE:EQ:RELIANCE` (the underlying stock), just with `segment`, `expiry`, `strike`, and `option_type` filled in. What differs by segment is only how real the underlying data is:
+
+| Exchange | Segment | Coverage | Notes |
+|---|---|---|---|
+| `NSE` | `EQ` (cash equities) | **Real**, auto-updated nightly | Real NSE bhavcopy |
+| `BSE` | `EQ` (cash equities) | **Real**, auto-updated nightly | Real BSE bhavcopy |
+| `NSE` | `FUT` (futures, stocks & indices) | **Real**, auto-updated nightly | Real expiries and open interest (no strike — futures don't have one) |
+| `NSE` | `OPT` (options, stocks & indices) | **Real**, auto-updated nightly | Real strikes, real expiries, real open interest, full option chains per underlying — not one synthetic contract |
+| `MCX` | `FUT` (commodities) | **Simulated only** — no real feed yet | Available for development/testing via the sandbox seeder, not sourced from a real MCX feed. If your integration needs real commodity prices, don't rely on `MCX` data yet. |
+
+For F&O contracts, use the `expiry`, `strike`, and `option_type` query parameters documented in Section 4B/4C to target a specific contract (e.g. `GET /v1/price/NSE/RELIANCE?segment=OPT&expiry=2026-06-25&strike=2450&option_type=CE`). `GET /v1/symbols/NSE?segment=FUT` or `?segment=OPT` lists what's currently available for a given segment.
+
+---
+
 ## 2. Getting API Credentials (Admin-Provisioned)
 
 Client API keys are **no longer self-service** — only the platform administrator can issue them. Before you can integrate, an admin must log in to the Admin Console (the site's web UI, gated behind an admin login) and create a key for you, specifying:
@@ -103,8 +119,12 @@ Returns the most recent eligible (compliance-gated) daily OHLCV record for a sym
 *   **Query Parameters**:
     *   `segment` (optional): `EQ` (default), `FUT`, or `OPT`
     *   `expiry`, `strike`, `option_type` (optional): for derivatives contracts
-*   **Example Request**:
+*   **Example Request (equity)**:
     `GET /v1/price/NSE/RELIANCE?segment=EQ`
+*   **Example Request (a specific option contract — real strikes/expiries, see Section 1b)**:
+    `GET /v1/price/NSE/RELIANCE?segment=OPT&expiry=2026-06-25&strike=2450&option_type=CE`
+*   **Example Request (futures contract)**:
+    `GET /v1/price/NSE/RELIANCE?segment=FUT&expiry=2026-06-25`
 
 ### C. Query Historical EOD Ranges
 Fetch historical daily open/high/low/close/volume (OHLCV) data for a specific asset over a custom time range.

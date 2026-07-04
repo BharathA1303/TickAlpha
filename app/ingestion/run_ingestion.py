@@ -19,6 +19,7 @@ from app.db.session import AsyncSessionLocal
 from app.db.models import PriceData, IngestionLog
 from app.ingestion.nse_bhavcopy import get_nse_data
 from app.ingestion.bse_bhavcopy import get_bse_data
+from app.ingestion.nse_fo_bhavcopy import get_nse_fo_data
 
 # Set up logging
 logging.basicConfig(
@@ -182,6 +183,15 @@ async def ingest_date_for_exchange(db, target_date: date, exchange: str, use_moc
                 mock_csv_content = "symbol,segment,date,open,high,low,close,volume\n" + \
                     "\n".join([f"{r['symbol']},{r['segment']},{target_date.isoformat()},{r['open']},{r['high']},{r['low']},{r['close']},{r['volume']}" for r in records])
                 archive_raw_data("BSE", target_date, "mock_bse_bhavcopy.csv", mock_csv_content)
+            elif exchange == "NSE_FO":
+                records = get_nse_fo_data(target_date, use_mock=True)
+                mock_csv_content = "symbol,segment,expiry,strike,option_type,date,open,high,low,close,volume\n" + \
+                    "\n".join([
+                        f"{r['symbol']},{r['segment']},{r['expiry']},{r['strike'] or ''},{r['option_type'] or ''},"
+                        f"{target_date.isoformat()},{r['open']},{r['high']},{r['low']},{r['close']},{r['volume']}"
+                        for r in records
+                    ])
+                archive_raw_data("NSE_FO", target_date, "mock_nse_fo_bhavcopy.csv", mock_csv_content)
             else:
                 records = []
         else:
@@ -193,7 +203,7 @@ async def ingest_date_for_exchange(db, target_date: date, exchange: str, use_moc
                     zip_bytes = download_nse_bhavcopy(target_date)
                     # Archive raw ZIP file
                     archive_raw_data("NSE", target_date, "cmbhav.csv.zip", zip_bytes)
-                    
+
                     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
                         csv_filenames = [name for name in z.namelist() if name.endswith(".csv")]
                         if csv_filenames:
@@ -214,6 +224,23 @@ async def ingest_date_for_exchange(db, target_date: date, exchange: str, use_moc
                     records = parse_bse_bhavcopy_csv(csv_text, target_date)
                 except FileNotFoundError:
                     logger.warning(f"No BSE bhavcopy found for {target_date} on official servers.")
+                    records = []
+            elif exchange == "NSE_FO":
+                from app.ingestion.nse_fo_bhavcopy import download_nse_fo_bhavcopy, parse_nse_fo_bhavcopy_csv, zipfile, io
+                try:
+                    zip_bytes = download_nse_fo_bhavcopy(target_date)
+                    archive_raw_data("NSE_FO", target_date, "fobhav.csv.zip", zip_bytes)
+
+                    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+                        csv_filenames = [name for name in z.namelist() if name.endswith(".csv")]
+                        if csv_filenames:
+                            with z.open(csv_filenames[0]) as f:
+                                csv_content = f.read().decode("utf-8", errors="ignore")
+                                records = parse_nse_fo_bhavcopy_csv(csv_content, target_date)
+                        else:
+                            records = []
+                except FileNotFoundError:
+                    logger.warning(f"No NSE F&O bhavcopy found for {target_date} on official servers.")
                     records = []
             else:
                 raise ValueError(f"Unknown exchange: {exchange}")
@@ -259,58 +286,72 @@ async def ingest_date_for_exchange(db, target_date: date, exchange: str, use_moc
         return 0
 
 async def ingest_date(target_date: date, use_mock: bool) -> Dict[str, int]:
-    """Ingests both NSE and BSE bhavcopies for a given date."""
+    """Ingests NSE/BSE cash equities and NSE F&O bhavcopies for a given date."""
     if not is_trading_day(target_date):
         logger.info(f"Skipping {target_date} - it is a weekend.")
-        return {"NSE": 0, "BSE": 0}
+        return {"NSE": 0, "BSE": 0, "NSE_FO": 0}
 
     async with AsyncSessionLocal() as db:
         try:
             nse_rows = await ingest_date_for_exchange(db, target_date, "NSE", use_mock)
             bse_rows = await ingest_date_for_exchange(db, target_date, "BSE", use_mock)
+            nse_fo_rows = await ingest_date_for_exchange(db, target_date, "NSE_FO", use_mock)
             await db.commit()
 
-            # A trading day that yields zero rows from BOTH exchanges almost
-            # always means the source was blocked/unreachable rather than a
-            # genuine holiday (holidays are rare and usually known in
-            # advance). Log at ERROR so it surfaces in alerting/monitoring
-            # instead of getting lost among routine INFO/WARNING lines.
+            # A trading day that yields zero rows from BOTH cash-equity
+            # exchanges almost always means the source was blocked/
+            # unreachable rather than a genuine holiday (holidays are rare
+            # and usually known in advance). F&O is checked separately since
+            # it's a distinct source that can fail independently. Log at
+            # ERROR so it surfaces in alerting/monitoring instead of getting
+            # lost among routine INFO/WARNING lines.
             if not use_mock and nse_rows == 0 and bse_rows == 0:
                 logger.error(
                     f"ZERO ROWS INGESTED for trading day {target_date} across NSE and BSE. "
                     f"This likely indicates the exchange sources were blocked or unreachable, "
                     f"not a holiday. Check ingestion_log and /v1/ingestion-status/health."
                 )
+            if not use_mock and nse_fo_rows == 0:
+                logger.error(
+                    f"ZERO ROWS INGESTED for NSE F&O on trading day {target_date}. "
+                    f"This likely indicates the source was blocked or unreachable, "
+                    f"not a holiday. Check ingestion_log and /v1/ingestion-status/health."
+                )
 
-            return {"NSE": nse_rows, "BSE": bse_rows}
+            return {"NSE": nse_rows, "BSE": bse_rows, "NSE_FO": nse_fo_rows}
         except Exception as e:
             logger.error(f"Database error during ingestion commit for {target_date}: {e}")
             await db.rollback()
-            return {"NSE": 0, "BSE": 0}
+            return {"NSE": 0, "BSE": 0, "NSE_FO": 0}
 
 async def run_backfill(days_to_backfill: int, use_mock: bool):
     """Backfills the database with historical data for the last N calendar days."""
     today_date = date.today()
     logger.info(f"Running backfill for the last {days_to_backfill} days starting from yesterday...")
-    
+
     total_nse = 0
     total_bse = 0
-    
+    total_nse_fo = 0
+
     for i in range(1, days_to_backfill + 1):
         target_date = today_date - timedelta(days=i)
         if not is_trading_day(target_date):
             logger.info(f"Skipping date {target_date} (weekend)")
             continue
-            
+
         logger.info(f"Backfilling day {i}/{days_to_backfill}: {target_date}")
         counts = await ingest_date(target_date, use_mock)
         total_nse += counts["NSE"]
         total_bse += counts["BSE"]
-        
+        total_nse_fo += counts.get("NSE_FO", 0)
+
         if not use_mock:
             await asyncio.sleep(1.0)
-            
-    logger.info(f"Backfill complete. Total NSE records: {total_nse}, Total BSE records: {total_bse}")
+
+    logger.info(
+        f"Backfill complete. Total NSE records: {total_nse}, Total BSE records: {total_bse}, "
+        f"Total NSE F&O records: {total_nse_fo}"
+    )
 
 async def main():
     parser = argparse.ArgumentParser(description="Ingest NSE/BSE Equity Bhavcopies.")

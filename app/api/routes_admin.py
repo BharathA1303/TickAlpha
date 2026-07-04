@@ -1,7 +1,7 @@
 import logging
 import secrets
 from datetime import date, timedelta
-from typing import List, Optional
+from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, Query, status, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select, desc
@@ -96,9 +96,12 @@ async def get_ingestion_health(
     """
     Reports whether nightly ingestion is up to date, for use by external
     monitoring/alerting (or the admin console) rather than having to grep logs.
-    Flags any trading day in the lookback window where both NSE and BSE
-    ingestion logged zero rows (a strong signal of a blocked/broken source),
-    and reports how many days have passed since the last successful run.
+    Flags any trading day in the lookback window where ANY individual source
+    (nse_bhavcopy, bse_bhavcopy, nse_fo_bhavcopy) logged zero rows or is
+    missing entirely - checked per-source rather than as one combined total,
+    so e.g. a working equities ingestion can't mask a broken F&O source (or
+    vice versa) that happens to run alongside it. Also reports how many days
+    have passed since the last day where every expected source succeeded.
     """
     if "admin" not in client.scopes:
         raise HTTPException(
@@ -106,8 +109,15 @@ async def get_ingestion_health(
             detail="Admin privileges required to view ingestion health"
         )
 
+    # Sources the nightly job always attempts (see run_ingestion.ingest_date).
+    # MCX is intentionally excluded - it has no real ingestion path yet
+    # (see app/ingestion/mcx_bhavcopy.py), so it would always show as
+    # "missing" and drown out genuine problems with the sources that do run.
+    EXPECTED_SOURCES = {"nse_bhavcopy", "bse_bhavcopy", "nse_fo_bhavcopy"}
+
     today = date.today()
     problem_dates: List[str] = []
+    problem_details: Dict[str, List[str]] = {}
     last_success_date: Optional[date] = None
 
     for i in range(lookback_days):
@@ -120,12 +130,14 @@ async def get_ingestion_health(
         day_logs = result.scalars().all()
 
         rows_by_source = {log.source: log.rows_ingested for log in day_logs}
-        total_rows = sum(rows_by_source.values())
+        failing_sources = sorted(
+            source for source in EXPECTED_SOURCES
+            if rows_by_source.get(source, 0) == 0
+        )
 
-        if not day_logs:
+        if failing_sources:
             problem_dates.append(check_date.isoformat())
-        elif total_rows == 0:
-            problem_dates.append(check_date.isoformat())
+            problem_details[check_date.isoformat()] = failing_sources
         elif last_success_date is None:
             last_success_date = check_date
 
@@ -138,11 +150,12 @@ async def get_ingestion_health(
         "last_successful_ingestion_date": last_success_date.isoformat() if last_success_date else None,
         "days_since_last_success": days_since_success,
         "problem_trading_days": problem_dates,
+        "problem_sources_by_day": problem_details,
         "message": (
             "Ingestion is up to date."
             if is_healthy
-            else f"{len(problem_dates)} trading day(s) in the lookback window have missing or zero-row ingestion. "
-                 f"Check ingestion_log for error_message details (likely NSE/BSE source blocking)."
+            else f"{len(problem_dates)} trading day(s) in the lookback window have a source with missing or "
+                 f"zero-row ingestion (see problem_sources_by_day). Check ingestion_log for error_message details."
         )
     }
 

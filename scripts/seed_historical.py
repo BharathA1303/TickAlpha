@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 import yfinance as yf
 import numpy as np
+from sqlalchemy import select, and_, update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import func
 
@@ -69,11 +70,41 @@ def save_csv_archive(exchange: str, target_date: date, filename: str, rows: list
         writer.writerows(rows)
     logger.info(f"Saved raw archive backup to: {file_path}")
 
+def _record_key(r) -> tuple:
+    """Mirrors app.ingestion.run_ingestion._record_key: the identity tuple
+    that - together with `version` - makes up price_data's versioned unique
+    constraint. Works on either a plain dict or a PriceData ORM instance."""
+    get = r.get if isinstance(r, dict) else (lambda k: getattr(r, k))
+    return (
+        get("symbol"), get("exchange"), get("segment"),
+        get("expiry"), float(get("strike")), get("option_type"), get("market_timestamp"),
+    )
+
+
+def _ohlcv_changed(existing: PriceData, new: dict) -> bool:
+    return (
+        float(existing.open) != float(new["open"])
+        or float(existing.high) != float(new["high"])
+        or float(existing.low) != float(new["low"])
+        or float(existing.close) != float(new["close"])
+        or int(existing.volume) != int(new["volume"])
+        or int(existing.open_interest) != int(new["open_interest"])
+    )
+
+
 def upsert_records(db, records: list) -> int:
-    """Upserts records into Postgres using ON CONFLICT do update."""
+    """
+    Inserts/corrects EOD records using the same versioned-upsert semantics as
+    app.ingestion.run_ingestion.save_records_to_db (sync equivalent, since
+    this seeder uses the sync DB session): never overwrites price_data rows
+    in place. Unchanged re-seeding of the same date is a no-op; a changed
+    value inserts a new version and marks the old one superseded. See
+    save_records_to_db's docstring in app/ingestion/run_ingestion.py for the
+    full rationale (tick replay history must not change silently).
+    """
     if not records:
         return 0
-        
+
     # Normalize default values for non-null constraint safety
     for r in records:
         if r.get("expiry") is None:
@@ -84,25 +115,55 @@ def upsert_records(db, records: list) -> int:
             r["option_type"] = "XX"
         if r.get("open_interest") is None:
             r["open_interest"] = 0
-        
-    stmt = pg_insert(PriceData).values(records)
-    update_dict = {
-        "open": stmt.excluded.open,
-        "high": stmt.excluded.high,
-        "low": stmt.excluded.low,
-        "close": stmt.excluded.close,
-        "volume": stmt.excluded.volume,
-        "open_interest": stmt.excluded.open_interest,
-        "ingested_at": func.now()
-    }
-    
-    upsert_stmt = stmt.on_conflict_do_update(
-        constraint="uq_price_data_symbol_exchange_segment_date",
-        set_=update_dict
+
+    symbols = list({r["symbol"] for r in records})
+    exchanges = list({r["exchange"] for r in records})
+    segments = list({r["segment"] for r in records})
+    dates = list({r["market_timestamp"] for r in records})
+
+    stmt = select(PriceData).where(
+        and_(
+            PriceData.symbol.in_(symbols),
+            PriceData.exchange.in_(exchanges),
+            PriceData.segment.in_(segments),
+            PriceData.market_timestamp.in_(dates),
+            PriceData.superseded_at.is_(None),
+        )
     )
-    
-    db.execute(upsert_stmt)
-    return len(records)
+    current_by_key = {_record_key(row): row for row in db.execute(stmt).scalars().all()}
+
+    to_insert = []
+    to_supersede_ids = []
+    written_count = 0
+
+    for r in records:
+        key = _record_key(r)
+        existing = current_by_key.get(key)
+
+        if existing is None:
+            new_record = dict(r)
+            new_record["version"] = 1
+            to_insert.append(new_record)
+            written_count += 1
+        elif _ohlcv_changed(existing, r):
+            to_supersede_ids.append(existing.id)
+            new_record = dict(r)
+            new_record["version"] = existing.version + 1
+            to_insert.append(new_record)
+            written_count += 1
+        # else: unchanged, no-op.
+
+    if to_supersede_ids:
+        db.execute(
+            sa_update(PriceData)
+            .where(PriceData.id.in_(to_supersede_ids))
+            .values(superseded_at=func.now())
+        )
+
+    if to_insert:
+        db.execute(pg_insert(PriceData).values(to_insert))
+
+    return written_count
 
 def main():
     # Make sure tables exist

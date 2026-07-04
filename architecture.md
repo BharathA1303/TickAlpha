@@ -167,20 +167,34 @@ Historical data is **permanent and append-only**: every trading day's EOD record
 
 ### Automatic Nightly Update
 The `scheduler` process (Section 6B) runs a cron job at **19:00 IST daily** ([main.py](app/main.py)) that:
-1.  Ingests the current day's NSE and BSE bhavcopies.
-2.  Self-heals gaps: re-checks the last 7 trading days and backfills any day with no `price_data` rows (e.g. from a missed run during downtime, or a prior source outage).
+1.  Ingests the current day's NSE cash-equity, BSE cash-equity, and NSE F&O bhavcopies (see "Segment Coverage" below).
+2.  Self-heals gaps: re-checks the last 7 trading days and backfills any day missing either EQ or NSE F&O data (e.g. from a missed run during downtime, or a prior source outage) — checked per-segment so a broken F&O source can't hide behind a working equities ingestion, or vice versa.
+
+### Segment Coverage: What's Real vs. Synthetic
+
+| Exchange | Segment | Data source | Status |
+|---|---|---|---|
+| NSE | EQ (cash equities) | Real UDiFF bhavcopy ([nse_bhavcopy.py](app/ingestion/nse_bhavcopy.py)) | Real, ingested nightly |
+| BSE | EQ (cash equities) | Real bhavcopy ([bse_bhavcopy.py](app/ingestion/bse_bhavcopy.py)) | Real, ingested nightly |
+| NSE | FUT / OPT (futures & options, stocks and indices) | Real UDiFF F&O bhavcopy ([nse_fo_bhavcopy.py](app/ingestion/nse_fo_bhavcopy.py)) | Real, ingested nightly — real strikes, real expiries, real open interest, full option chains per underlying |
+| MCX | FUT (commodities) | Synthetic only ([seed_historical.py](scripts/seed_historical.py)) | **Not yet implemented as a real feed** — see below |
+
+Real NSE F&O ingestion produces the same data shape a broker would show you: every strike/expiry/option-type combination that traded that day, with genuine open interest, not a single synthesized contract per underlying. It plugs into the exact same `price_data` table, delay gate, versioning/correction model (Section 8), and Brownian Bridge tick simulator as cash equities — a client subscribing to `NSE:OPT:RELIANCE` behaves identically to subscribing to `NSE:EQ:RELIANCE`, just against options data instead of the underlying.
+
+**MCX commodities remain synthetic-only for now.** MCX is a separate exchange from NSE with no confirmed stable bhavcopy download endpoint (its public download page is JS-driven, unlike NSE's static UDiFF archive). Rather than ship a scraper built on a guessed URL — which could silently return zero rows indefinitely without a clear failure signal — [mcx_bhavcopy.py](app/ingestion/mcx_bhavcopy.py) is an explicit stub: its real-data functions raise `NotImplementedError` with a pointer to what's needed, while its mock-mode function still works for local/dev use. Until a verified MCX endpoint (or a paid commercial feed) is wired in, MCX commodity data is only available via the synthetic sandbox seeder ([seed_historical.py](scripts/seed_historical.py)), which should be treated as clearly-simulated dev data, not real historical MCX prices.
 
 ### Download Resilience
-NSE and BSE bhavcopy downloads ([nse_bhavcopy.py](app/ingestion/nse_bhavcopy.py), [bse_bhavcopy.py](app/ingestion/bse_bhavcopy.py)) go through public exchange endpoints that apply anti-bot protection and occasionally rate-limit or block scraped requests. To avoid a transient block being misread as "no data today":
+NSE and BSE bhavcopy downloads (cash equity: [nse_bhavcopy.py](app/ingestion/nse_bhavcopy.py) / [bse_bhavcopy.py](app/ingestion/bse_bhavcopy.py); F&O: [nse_fo_bhavcopy.py](app/ingestion/nse_fo_bhavcopy.py)) go through public exchange endpoints that apply anti-bot protection and occasionally rate-limit or block scraped requests. To avoid a transient block being misread as "no data today":
 *   Requests are throttled (~0.75s minimum interval) and retried up to 3 times with exponential backoff (1s, 2s, 4s) on network errors, non-404 HTTP errors, or responses that look like an HTML challenge page instead of the expected CSV/zip.
 *   A genuine `404` (holiday/weekend) is never retried — it's treated as an authoritative "no data" result.
-*   For production deployments with strict uptime requirements, a paid commercial feed (e.g. TrueData) is still recommended as documented in the README; the ingestion module's `get_nse_data()` / `get_bse_data()` entrypoints are natural seams for adding a fallback provider.
+*   For production deployments with strict uptime requirements, a paid commercial feed (e.g. TrueData) is still recommended as documented in the README; the ingestion modules' `get_nse_data()` / `get_bse_data()` / `get_nse_fo_data()` entrypoints are natural seams for adding a fallback provider.
 
 ### Monitoring Ingestion Health
 Rather than requiring log access to notice a failure, `GET /v1/ingestion-status/health` (admin scope required) reports whether ingestion is current:
 *   Scans the trailing N trading days (default 7) in `ingestion_log`.
-*   Flags any trading day where both exchanges logged zero rows, or logged nothing at all, as a `problem_trading_day`.
+*   Flags any trading day where **any individual expected source** (`nse_bhavcopy`, `bse_bhavcopy`, or `nse_fo_bhavcopy`) logged zero rows or is missing entirely — checked per-source, not as one combined total, so a healthy equities ingestion can't mask a broken F&O source running alongside it (or vice versa). The response includes a `problem_sources_by_day` breakdown naming exactly which source(s) failed on which day.
 *   Returns `status: "degraded"` plus the number of days since the last fully-successful run, so external monitoring (or the admin console) can alert on staleness instead of silently serving increasingly outdated "latest price" data.
+*   MCX is intentionally excluded from this health check (see Segment Coverage above) since it has no real ingestion path yet and would otherwise always show as failing.
 
 The nightly job itself also logs at `ERROR` (not just `WARNING`) when a trading day yields zero rows from both exchanges, so this is visible in standard log-based alerting too.
 
