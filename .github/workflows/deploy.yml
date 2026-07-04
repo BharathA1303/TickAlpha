@@ -83,7 +83,7 @@ jobs:
           script: |
             echo "Starting deploy..."
             # Navigate to directory (defaulting to /var/www/TickAlpha, update this if your path is different)
-            cd ${{ secrets.DEPLOY_PATH || '/var/www/TickAlpha' }}
+            cd ${{ secrets.DEPLOY_PATH || '/root/TickAlpha' }}
             
             # Fetch latest changes
             git fetch --all
