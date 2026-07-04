@@ -2,7 +2,7 @@ import json
 import logging
 import uuid
 from datetime import date
-from typing import List, Optional
+from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -198,31 +198,47 @@ async def subscribe_symbols(
     # a single batch query to avoid N+1 database queries. Filtering to the
     # current version avoids accidentally picking up a stale superseded row
     # for symbols that have been corrected.
+    #
+    # NOTE: F&O symbols (segment FUT/OPT) can have MULTIPLE rows sharing the
+    # same (exchange, segment, symbol) - one per strike/expiry/option_type
+    # (e.g. NSE:OPT:RELIANCE has a separate row for every strike and CE/PE).
+    # eod_by_spec below intentionally keeps only ONE representative row per
+    # (exchange, segment, symbol) for resolving bare symbol specs like
+    # "NSE:FUT:RELIANCE" or wildcard/ALL expansion - this matches how equities
+    # already worked (one row per symbol) and extends it to "one representative
+    # contract per underlying" for F&O wildcard resolution, rather than trying
+    # to enumerate every strike. A client that wants a SPECIFIC option contract
+    # should use the dedicated price endpoints with expiry/strike/option_type
+    # (see api_integration_guide.md Section 1b) rather than session wildcards.
     stmt = select(PriceData).where(
         PriceData.market_timestamp == target_date,
         PriceData.superseded_at.is_(None),
     )
     res = await db.execute(stmt)
     all_eod_rows = res.scalars().all()
-    eod_map = {
-        (row.exchange.upper(), row.segment.upper(), row.symbol.upper()): row
-        for row in all_eod_rows
-    }
+    eod_by_spec: Dict[tuple, PriceData] = {}
+    for row in all_eod_rows:
+        key = (row.exchange.upper(), row.segment.upper(), row.symbol.upper())
+        # Keep the first row seen per key as the "representative" contract;
+        # deterministic instead of "whichever happens to be last in the
+        # query result", though which specific contract wins is inherently
+        # arbitrary for multi-contract symbols (see note above).
+        eod_by_spec.setdefault(key, row)
 
     for spec in req.symbols:
         spec_upper = spec.strip().upper()
-        
+
         # 1. Resolve symbols (handle wildcards or literal symbol spec) using the preloaded map
         resolved_specs = []
         if spec_upper == "ALL":
-            resolved_specs = [f"{ex}:{seg}:{sym}" for ex, seg, sym in eod_map.keys()]
+            resolved_specs = [f"{ex}:{seg}:{sym}" for ex, seg, sym in eod_by_spec.keys()]
         elif spec_upper.endswith(":ALL"):
             parts = spec_upper.split(":")
             if len(parts) == 3:
                 ex_filter, seg_filter = parts[0], parts[1]
                 resolved_specs = [
                     f"{ex}:{seg}:{sym}"
-                    for ex, seg, sym in eod_map.keys()
+                    for ex, seg, sym in eod_by_spec.keys()
                     if ex == ex_filter and seg == seg_filter
                 ]
             else:
@@ -245,12 +261,12 @@ async def subscribe_symbols(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No EOD data found matching target '{spec}' on date {target_date}."
             )
-            
+
         # 2. Process and cache each resolved symbol
         for resolved_spec in resolved_specs:
             parts = resolved_spec.split(":")
             exchange, segment, symbol = parts[0].upper(), parts[1].upper(), parts[2].upper()
-            
+
             # Verify client scope for this specific asset
             required_scope = f"{exchange.lower()}:{segment.lower()}"
             if required_scope not in client.scopes:
@@ -273,17 +289,25 @@ async def subscribe_symbols(
                         detail=f"Client's API key is not permitted to access symbol '{resolved_spec}'"
                     )
 
-            # Trigger tick cache generation (Brownian Bridge generation) using preloaded EOD data
-            eod_obj = eod_map.get((exchange, segment, symbol))
-            success = await ensure_ticks_cached(
+            # Resolve the EOD row for this spec. eod_obj can legitimately be
+            # None here (e.g. a literal spec the preload didn't cover), in
+            # which case ensure_ticks_cached falls back to querying it fresh
+            # internally and returns the row IT resolved - so we read the
+            # version from that return value, never from the possibly-None
+            # eod_obj local (that mismatch was the source of a 500 crash:
+            # ensure_ticks_cached could succeed via its own internal lookup
+            # while eod_obj stayed None, and `eod_obj.version` would then
+            # raise AttributeError on a None).
+            eod_obj = eod_by_spec.get((exchange, segment, symbol))
+            resolved_eod = await ensure_ticks_cached(
                 db=db,
                 exchange=exchange,
                 segment=segment,
                 symbol=symbol,
                 target_date=target_date,
-                eod_data=eod_obj
+                eod_data=eod_obj,
             )
-            if not success:
+            if resolved_eod is None:
                 if spec_upper == "ALL" or spec_upper.endswith(":ALL"):
                     continue
                 else:
@@ -291,12 +315,12 @@ async def subscribe_symbols(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"No EOD price data found for '{resolved_spec}' on date {target_date} to simulate ticks."
                     )
-            
+
             current_subs.add(resolved_spec)
             # Pin this subscription to the version that was current at
             # subscribe-time, so a later correction doesn't change the ticks
             # this session streams mid-replay.
-            subscription_versions[resolved_spec] = eod_obj.version
+            subscription_versions[resolved_spec] = resolved_eod.version
 
     state["subscriptions"] = list(current_subs)
     state["subscription_versions"] = subscription_versions

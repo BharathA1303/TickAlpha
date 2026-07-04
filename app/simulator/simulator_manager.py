@@ -347,11 +347,11 @@ class SimulatorManager:
                 eod_data = result.scalars().first()
                 if eod_data is None:
                     continue
-                success = await ensure_ticks_cached(
+                resolved_eod = await ensure_ticks_cached(
                     db, exchange, segment, symbol, new_date, eod_data=eod_data
                 )
-                if success:
-                    new_subscription_versions[spec] = eod_data.version
+                if resolved_eod is not None:
+                    new_subscription_versions[spec] = resolved_eod.version
 
         return new_date, new_subscription_versions
 

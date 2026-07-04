@@ -152,11 +152,19 @@ async def ensure_ticks_cached(
     symbol: str,
     target_date: date,
     eod_data: Optional[PriceData] = None
-) -> bool:
+) -> Optional[PriceData]:
     """
     Checks if ticks are cached in Redis. If not, fetches EOD data,
     generates simulated ticks using the Brownian Bridge, and caches them.
-    Returns True if ticks are ready in cache, False if no EOD source data is found.
+
+    Returns the resolved PriceData row (truthy) if ticks are ready in cache,
+    or None (falsy) if no EOD source data was found - `if await
+    ensure_ticks_cached(...):` works exactly like the old bool-returning
+    version. Callers that also need to know WHICH row was actually used
+    (e.g. to read its `.version`) should use the return value directly
+    rather than re-reading whatever `eod_data` they originally passed in:
+    when `eod_data` is None, this function resolves its own row internally,
+    so the caller's original (possibly None) local variable would be stale.
     """
     # Cache miss - fetch EOD data if not preloaded (needed for both the
     # version-namespaced cache key and, on a miss, tick generation itself).
@@ -172,14 +180,14 @@ async def ensure_ticks_cached(
 
     if not eod_data:
         logger.warning(f"No EOD data found for {exchange}:{segment}:{symbol} on {target_date}")
-        return False
+        return None
 
     cache_key = tick_cache_key(exchange, segment, symbol, target_date, eod_data.version)
 
     cached = await get_cached_response(cache_key)
     if cached:
         logger.info(f"Tick cache hit for {exchange}:{segment}:{symbol} on {target_date} (version {eod_data.version})")
-        return True
+        return eod_data
 
     # Generate ticks
     ticks = generate_brownian_bridge_ticks(
@@ -198,4 +206,4 @@ async def ensure_ticks_cached(
         f"Generated and cached {len(ticks)} ticks for {exchange}:{segment}:{symbol} "
         f"on {target_date} (version {eod_data.version})"
     )
-    return True
+    return eod_data

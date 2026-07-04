@@ -1,8 +1,9 @@
 import logging
 from contextlib import asynccontextmanager
 from datetime import date
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from sqlalchemy import select
 
@@ -151,6 +152,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """
+    Guarantees every response is valid JSON, even for a bug we didn't
+    anticipate. Without this, an unhandled exception in a route (e.g. a
+    schema/DB mismatch, a None where a row was expected) can produce a
+    plain-text/traceback body depending on the deployment stack in front of
+    the app - which breaks any client that (correctly) expects JSON and
+    calls response.json() on every response, producing a confusing
+    "not valid JSON" error that hides the real problem. This still isn't a
+    substitute for fixing the underlying bug (logged in full here), but a
+    real broker-style API should never hand a client a non-JSON body.
+    """
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error. This has been logged."},
+    )
 
 # Register routers
 app.include_router(routes_auth.router)
