@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import List, Dict, Any
 
-from sqlalchemy import select
+from sqlalchemy import select, and_, update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import func
 
@@ -47,11 +47,52 @@ def archive_raw_data(exchange: str, target_date: date, filename: str, content: A
         
     logger.info(f"Archived raw file to: {file_path}")
 
+def _record_key(r: Dict[str, Any]) -> tuple:
+    """The (symbol, exchange, segment, expiry, strike, option_type, market_timestamp)
+    identity tuple that - together with `version` - makes up price_data's
+    versioned unique constraint. Works on either a plain dict (incoming
+    record) or a PriceData ORM instance (existing row), since both expose
+    the same attribute/key names."""
+    get = r.get if isinstance(r, dict) else lambda k: getattr(r, k)
+    return (
+        get("symbol"), get("exchange"), get("segment"),
+        get("expiry"), float(get("strike")), get("option_type"), get("market_timestamp"),
+    )
+
+
+def _ohlcv_changed(existing: PriceData, new: Dict[str, Any]) -> bool:
+    """Whether the incoming record's OHLCV/OI differs from the current stored version."""
+    return (
+        float(existing.open) != float(new["open"])
+        or float(existing.high) != float(new["high"])
+        or float(existing.low) != float(new["low"])
+        or float(existing.close) != float(new["close"])
+        or int(existing.volume) != int(new["volume"])
+        or int(existing.open_interest) != int(new["open_interest"])
+    )
+
+
 async def save_records_to_db(db, records: List[Dict[str, Any]]) -> int:
-    """Upserts list of records into PostgreSQL using native ON CONFLICT."""
+    """
+    Inserts/corrects EOD records into PostgreSQL using versioned upsert semantics.
+
+    Unlike a plain ON CONFLICT DO UPDATE, this never overwrites OHLCV in
+    place. For each incoming record:
+      - If no current version exists for its key: insert as version 1.
+      - If a current version exists with identical OHLCV/OI: no-op (routine
+        re-ingestion of unchanged data, e.g. re-running the same day).
+      - If a current version exists with DIFFERENT OHLCV/OI (a correction):
+        mark the old version `superseded_at` and insert a new row with
+        `version = old.version + 1`, which becomes the new current version.
+    This preserves every previously-served value for audit and keeps a tick
+    replay session that already cached ticks against an old version from
+    having its underlying EOD data change out from under it silently.
+    Returns the count of rows actually written (new keys + corrections);
+    unchanged records are not counted.
+    """
     if not records:
         return 0
-        
+
     # Ensure all dictionaries have all keys and resolve NULL unique constraint issue
     for r in records:
         if r.get("expiry") is None:
@@ -62,28 +103,66 @@ async def save_records_to_db(db, records: List[Dict[str, Any]]) -> int:
             r["option_type"] = "XX"
         if r.get("open_interest") is None:
             r["open_interest"] = 0
-        
-    # Bulk upsert using pg_insert
-    stmt = pg_insert(PriceData).values(records)
-    
-    # Define update mapping on conflict (preserving existing derivatives identifiers)
-    update_dict = {
-        "open": stmt.excluded.open,
-        "high": stmt.excluded.high,
-        "low": stmt.excluded.low,
-        "close": stmt.excluded.close,
-        "volume": stmt.excluded.volume,
-        "open_interest": stmt.excluded.open_interest,
-        "ingested_at": func.now()
-    }
-    
-    upsert_stmt = stmt.on_conflict_do_update(
-        constraint="uq_price_data_symbol_exchange_segment_date",
-        set_=update_dict
+
+    # Batch-fetch the current version of every incoming key in one query
+    # (instead of one query per record) to avoid N+1 round trips.
+    symbols = list({r["symbol"] for r in records})
+    exchanges = list({r["exchange"] for r in records})
+    segments = list({r["segment"] for r in records})
+    dates = list({r["market_timestamp"] for r in records})
+
+    stmt = select(PriceData).where(
+        and_(
+            PriceData.symbol.in_(symbols),
+            PriceData.exchange.in_(exchanges),
+            PriceData.segment.in_(segments),
+            PriceData.market_timestamp.in_(dates),
+            PriceData.superseded_at.is_(None),
+        )
     )
-    
-    await db.execute(upsert_stmt)
-    return len(records)
+    result = await db.execute(stmt)
+    current_by_key = {_record_key(row): row for row in result.scalars().all()}
+
+    to_insert: List[Dict[str, Any]] = []
+    to_supersede_ids: List[int] = []
+    written_count = 0
+
+    for r in records:
+        key = _record_key(r)
+        existing = current_by_key.get(key)
+
+        if existing is None:
+            # Brand new key - first version.
+            new_record = dict(r)
+            new_record["version"] = 1
+            to_insert.append(new_record)
+            written_count += 1
+        elif _ohlcv_changed(existing, r):
+            # Correction: retire the old current version, insert the next one.
+            to_supersede_ids.append(existing.id)
+            new_record = dict(r)
+            new_record["version"] = existing.version + 1
+            to_insert.append(new_record)
+            written_count += 1
+            logger.warning(
+                f"EOD CORRECTION detected for {r['exchange']}:{r['segment']}:{r['symbol']} "
+                f"on {r['market_timestamp']}: close {float(existing.close)} -> {float(r['close'])} "
+                f"(version {existing.version} -> {existing.version + 1}). "
+                f"Old version retained for audit, not overwritten."
+            )
+        # else: unchanged, no-op.
+
+    if to_supersede_ids:
+        await db.execute(
+            sa_update(PriceData)
+            .where(PriceData.id.in_(to_supersede_ids))
+            .values(superseded_at=func.now())
+        )
+
+    if to_insert:
+        await db.execute(pg_insert(PriceData).values(to_insert))
+
+    return written_count
 
 async def ingest_date_for_exchange(db, target_date: date, exchange: str, use_mock: bool) -> int:
     """Downloads/generates and saves records for a specific exchange and date."""
@@ -184,12 +263,25 @@ async def ingest_date(target_date: date, use_mock: bool) -> Dict[str, int]:
     if not is_trading_day(target_date):
         logger.info(f"Skipping {target_date} - it is a weekend.")
         return {"NSE": 0, "BSE": 0}
-        
+
     async with AsyncSessionLocal() as db:
         try:
             nse_rows = await ingest_date_for_exchange(db, target_date, "NSE", use_mock)
             bse_rows = await ingest_date_for_exchange(db, target_date, "BSE", use_mock)
             await db.commit()
+
+            # A trading day that yields zero rows from BOTH exchanges almost
+            # always means the source was blocked/unreachable rather than a
+            # genuine holiday (holidays are rare and usually known in
+            # advance). Log at ERROR so it surfaces in alerting/monitoring
+            # instead of getting lost among routine INFO/WARNING lines.
+            if not use_mock and nse_rows == 0 and bse_rows == 0:
+                logger.error(
+                    f"ZERO ROWS INGESTED for trading day {target_date} across NSE and BSE. "
+                    f"This likely indicates the exchange sources were blocked or unreachable, "
+                    f"not a holiday. Check ingestion_log and /v1/ingestion-status/health."
+                )
+
             return {"NSE": nse_rows, "BSE": bse_rows}
         except Exception as e:
             logger.error(f"Database error during ingestion commit for {target_date}: {e}")

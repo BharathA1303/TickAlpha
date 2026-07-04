@@ -1,8 +1,9 @@
 import csv
 import io
+import time
 import logging
 from datetime import date
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import requests
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,12 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.5",
     "Referer": "https://www.bseindia.com/"
 }
+
+# Mirrors the NSE downloader's throttling/retry approach so a transient block
+# or network hiccup isn't mistaken for "no data today".
+MIN_REQUEST_INTERVAL_SECONDS = 0.75
+MAX_RETRIES = 3
+BACKOFF_BASE_SECONDS = 1.0
 
 def get_bse_bhavcopy_url(target_date: date) -> str:
     """
@@ -27,16 +34,47 @@ def get_bse_bhavcopy_url(target_date: date) -> str:
     return f"https://www.bseindia.com/download/BhavCopy/Equity/EQ{day}{month}{year_short}.CSV"
 
 def download_bse_bhavcopy(target_date: date) -> str:
-    """Downloads the BSE bhavcopy CSV for a given date."""
+    """
+    Downloads the BSE bhavcopy CSV for a given date.
+    Retries transient failures (network errors, non-404 HTTP errors, and
+    anti-bot blocks that return an HTML page instead of a CSV) with
+    exponential backoff before giving up.
+    """
     url = get_bse_bhavcopy_url(target_date)
-    logger.info(f"Downloading BSE Bhavcopy from URL: {url}")
-    
-    response = requests.get(url, headers=HEADERS, timeout=15)
-    if response.status_code == 404:
-        raise FileNotFoundError(f"BSE Bhavcopy not found for {target_date} (likely a market holiday or weekend)")
-    response.raise_for_status()
-    
-    return response.text
+
+    last_error: Optional[Exception] = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        logger.info(f"Downloading BSE Bhavcopy from URL: {url} (attempt {attempt}/{MAX_RETRIES})")
+        time.sleep(MIN_REQUEST_INTERVAL_SECONDS)
+
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=15)
+            if response.status_code == 404:
+                raise FileNotFoundError(f"BSE Bhavcopy not found for {target_date} (likely a market holiday or weekend)")
+            response.raise_for_status()
+
+            text = response.text
+            if text.strip().startswith("<!DOCTYPE") or "<html" in text.lower():
+                raise ValueError(
+                    f"BSE response for {target_date} was HTML instead of CSV - likely blocked by anti-bot protection"
+                )
+
+            return text
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            last_error = e
+            if attempt < MAX_RETRIES:
+                backoff = BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                logger.warning(
+                    f"BSE Bhavcopy download attempt {attempt}/{MAX_RETRIES} failed for {target_date}: {e}. "
+                    f"Retrying in {backoff:.1f}s..."
+                )
+                time.sleep(backoff)
+
+    raise RuntimeError(
+        f"BSE Bhavcopy download failed for {target_date} after {MAX_RETRIES} attempts: {last_error}"
+    ) from last_error
 
 def parse_bse_bhavcopy_csv(csv_content: str, target_date: date) -> List[Dict[str, Any]]:
     """

@@ -37,6 +37,17 @@ class Settings(BaseSettings):
     ADMIN_USERNAME: str = "admin1"
     ADMIN_PASSWORD: str = "pass001"
 
+    # Process role toggles for horizontal scaling.
+    # SimulatorManager's clock-advance loop and the APScheduler nightly
+    # ingestion job are process-wide singletons: running them in more than
+    # one process at once would double-broadcast ticks and double-run
+    # ingestion. When running multiple API replicas behind a load balancer,
+    # set these to False on all replicas except one dedicated "worker" process
+    # (see docker-compose.yml's `scheduler` service). Single-instance/local/
+    # test setups should leave both True (the default).
+    ENABLE_SIMULATOR_LOOP: bool = True
+    ENABLE_SCHEDULER: bool = True
+
 
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),

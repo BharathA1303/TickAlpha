@@ -15,6 +15,17 @@ To comply with regulatory guidelines:
 
 ---
 
+## 1a. Data Freshness Guarantees
+
+If you are integrating this data layer into another platform, here is what you can rely on:
+
+*   **Historical data is permanent and never silently overwritten.** Once a trading day's EOD record is ingested, it is retained indefinitely. If an exchange later issues a corrected bhavcopy for a day you've already queried (this does happen, though rarely), the old value is **not** replaced in place — it's kept as a superseded version, and the corrected value becomes the new current version. `GET /v1/price/{exchange}/{symbol}/range` and the "latest price" endpoint always return the current (corrected, if applicable) version automatically. See Section 4D to inspect the correction history of a specific day if you need it.
+*   **New data arrives automatically every day.** A backend job ingests each day's NSE and BSE EOD data at **19:00 IST**, so the dataset self-extends daily without any action needed from you. If a run is missed (e.g. brief downtime), the same job automatically backfills any gap found in the trailing 7 trading days on its next run — you do not need to request backfills yourself.
+*   **Tick-by-tick data is simulated, not live.** Because this service operates under the 3-day compliance delay, "tick-by-tick real-time" means a deterministic Brownian Bridge simulation seeded from that day's real EOD OHLCV (Section 5 covers the exact mechanics), replayed at your chosen speed — not a live market feed. The same `(symbol, date, EOD version)` always reproduces the same tick path, so a replay session you've already started is never disrupted even if that day's EOD data is corrected later — you keep seeing exactly what you started with. A *new* session created after a correction will naturally replay the corrected values instead.
+*   **Check ingestion health proactively.** `GET /v1/ingestion-status/health` (requires a key with `admin` scope) reports whether the last 7 trading days ingested successfully, and flags degraded status if a source was blocked/unreachable. If you operate a downstream platform on top of this data, polling this endpoint (e.g. once every morning) is the recommended way to detect staleness before your own users do — see Section 4F.
+
+---
+
 ## 2. Getting API Credentials (Admin-Provisioned)
 
 Client API keys are **no longer self-service** — only the platform administrator can issue them. Before you can integrate, an admin must log in to the Admin Console (the site's web UI, gated behind an admin login) and create a key for you, specifying:
@@ -131,6 +142,68 @@ Fetch historical daily open/high/low/close/volume (OHLCV) data for a specific as
       }
     ]
     ```
+*   Every record now also includes `"version"` (integer, starts at 1) and `"is_current"` (always `true` for records returned by this endpoint, since range queries only return current versions — see Section 1a and D below).
+
+### D. View Correction History For a Single Day
+Returns every stored version of one day's EOD record (oldest first), including any superseded (corrected) versions — use this if `GET /v1/price/{exchange}/{symbol}/range` shows a value that seems to have changed since you last checked it, and you want to see exactly what changed.
+
+*   **Endpoint**: `GET /v1/price/{exchange}/{symbol}/history`
+*   **Path Parameters**:
+    *   `exchange`: `NSE`, `BSE`, or `MCX`
+    *   `symbol`: e.g. `RELIANCE`
+*   **Query Parameters**:
+    *   `date` (required): the trading date to inspect (`YYYY-MM-DD`), subject to the same 3-day delay gate as other endpoints.
+    *   `segment`, `expiry`, `strike`, `option_type` (optional): same meaning as other price endpoints.
+*   **Example Request**:
+    `GET /v1/price/NSE/RELIANCE/history?date=2026-06-01`
+*   **Example JSON Response** (a day that was corrected once):
+    ```json
+    {
+      "exchange": "NSE",
+      "segment": "EQ",
+      "symbol": "RELIANCE",
+      "market_timestamp": "2026-06-01",
+      "version_count": 2,
+      "was_corrected": true,
+      "versions": [
+        { "version": 1, "close": 2420.5, "is_current": false, "superseded_at": "2026-06-04T19:00:12+00:00", "...": "..." },
+        { "version": 2, "close": 2431.0, "is_current": true,  "superseded_at": null, "...": "..." }
+      ]
+    }
+    ```
+*   If the day was never corrected, `version_count` is `1` and `was_corrected` is `false`.
+
+### E. View Raw Ingestion Log (Admin Keys Only)
+Returns the raw audit trail of ingestion runs (one entry per exchange per day), including any `error_message` recorded on failure.
+
+*   **Endpoint**: `GET /v1/ingestion-status`
+*   **Requires**: a key with the `admin` scope.
+*   **Query Parameters**:
+    *   `limit` (optional, default `20`, max `100`): number of log records to return, most recent first.
+*   **Example Request**:
+    `GET /v1/ingestion-status?limit=10`
+
+### F. Check Ingestion Health (Admin Keys Only)
+Reports whether the nightly data-update job is current, so you can detect an upstream ingestion problem (e.g. NSE/BSE source blocked) instead of unknowingly serving stale "latest price" data to your users.
+
+*   **Endpoint**: `GET /v1/ingestion-status/health`
+*   **Requires**: a key with the `admin` scope.
+*   **Query Parameters**:
+    *   `lookback_days` (optional, default `7`, max `30`): how many trailing trading days to check.
+*   **Example Request**:
+    `GET /v1/ingestion-status/health?lookback_days=7`
+*   **Example JSON Response**:
+    ```json
+    {
+      "status": "healthy",
+      "lookback_days": 7,
+      "last_successful_ingestion_date": "2026-07-03",
+      "days_since_last_success": 1,
+      "problem_trading_days": [],
+      "message": "Ingestion is up to date."
+    }
+    ```
+*   If `status` is `"degraded"`, `problem_trading_days` lists the specific dates that had missing or zero-row ingestion — check `GET /v1/ingestion-status` (Section 4E) for the `error_message` detail on those dates.
 
 ---
 
@@ -187,6 +260,23 @@ Open a WebSocket connection to the feed endpoint:
 ### Step 5: Start Session Clock
 Trigger playback to begin streaming real-time ticks over the WebSocket:
 *   **Endpoint**: `POST /v1/sessions/{session_id}/start`
+
+### Sessions Run Continuously — Not Restricted to Market Hours
+A session's virtual clock simulates one trading day (09:15–15:30) at a time, but this is **not** a real-world market-hours restriction: you can create, start, and stream a session at any hour, any day. Once a session's virtual clock reaches simulated market close, it does **not** stop — it automatically rolls over to the next available trading day (still respecting the 3-day compliance delay) and resets its virtual clock to `09:15:00`, continuing to stream indefinitely. If no later day has data, it wraps back around to the earliest available day rather than going idle. This means a session can simply be left running to continuously exercise your integration without being recreated every simulated day.
+
+When a rollover happens, you'll receive a distinct WebSocket message instead of the usual `tick_update`:
+```json
+{
+  "type": "day_rollover",
+  "session_id": "sess_8ac8d72f928e100f",
+  "previous_date": "2026-06-15",
+  "date": "2026-06-16",
+  "virtual_time": "09:15:00",
+  "status": "active",
+  "ticks": {}
+}
+```
+Handle this alongside `tick_update` in your WebSocket message handler if your UI wants to visibly reflect the day change (e.g. resetting a chart's x-axis); otherwise it's safe to ignore and ticks will simply keep flowing for the new date.
 
 ---
 
@@ -274,6 +364,10 @@ async function runIntegration() {
             console.log(`  -> TICK ${symbol} | Price: ${tick.p} | Volume: ${tick.v}`);
           });
         }
+      } else if (data.type === "day_rollover") {
+        // The session never stops at market close - it automatically moves on
+        // to the next trading day and keeps streaming. See Section 5.
+        console.log(`Day rolled over: ${data.previous_date} -> ${data.date}. Clock reset to ${data.virtual_time}.`);
       }
     });
 
@@ -360,6 +454,10 @@ async def main():
                     for symbol, ticks in msg.get("ticks", {}).items():
                         for tick in ticks:
                             print(f"  {symbol}: Price {tick['p']} | Vol {tick['v']}")
+                elif msg.get("type") == "day_rollover":
+                    # Session never stops at market close - it rolls over to
+                    # the next trading day and keeps streaming. See Section 5.
+                    print(f"Day rolled over: {msg['previous_date']} -> {msg['date']}. Clock reset to {msg['virtual_time']}.")
         except websockets.exceptions.ConnectionClosed:
             print("WebSocket connection closed.")
 
@@ -385,3 +483,5 @@ if __name__ == "__main__":
 *   Cache JWTs client-side and reuse them until the 1-hour expiry rather than calling `/v1/auth/token` on every request.
 *   Feed tokens (`/v1/auth/feed-token`) are single-use and expire in 60 seconds — request one immediately before opening the WebSocket.
 *   Prefer targeted symbol subscriptions over `ALL` wildcards where possible to reduce tick cache generation load.
+*   The backend runs behind multiple stateless HTTP/WebSocket workers backed by shared Redis/Postgres state — you don't need to pin your requests to a specific server or worry about which one you land on. WebSocket reconnects are safe: your feed token flow (Section 5, Steps 3-4) always establishes a fresh, valid connection regardless of which backend worker handles it.
+*   If you're building a platform on top of this API rather than a single app, poll `GET /v1/ingestion-status/health` (Section 4F) once daily (e.g. right after your own morning cache warm-up) so a blocked upstream data source surfaces to you automatically instead of your users noticing stale prices first.

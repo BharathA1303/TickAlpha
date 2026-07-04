@@ -1,5 +1,6 @@
 import csv
 import io
+import time
 import zipfile
 import logging
 from datetime import date
@@ -16,6 +17,13 @@ HEADERS = {
     "Referer": "https://www.nseindia.com/"
 }
 
+# NSE's anti-bot protection tolerates roughly 3 req/sec from a given client;
+# a short pre-request delay plus retry/backoff keeps us well under that and
+# avoids transient 403s being mistaken for "no data today".
+MIN_REQUEST_INTERVAL_SECONDS = 0.75
+MAX_RETRIES = 3
+BACKOFF_BASE_SECONDS = 1.0
+
 def get_nse_bhavcopy_url(target_date: date) -> str:
     """
     Constructs the NSE bhavcopy URL using the new UDiFF format.
@@ -25,23 +33,60 @@ def get_nse_bhavcopy_url(target_date: date) -> str:
     return f"https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{date_str}_F_0000.csv.zip"
 
 def download_nse_bhavcopy(target_date: date) -> bytes:
-    """Downloads the zipped NSE bhavcopy for a given date."""
+    """
+    Downloads the zipped NSE bhavcopy for a given date.
+    Retries transient failures (network errors, non-404 HTTP errors, and
+    anti-bot blocks that return HTML instead of a zip) with exponential
+    backoff, since a single flaky request should not be mistaken for a
+    genuine "no data today" (404) result.
+    """
     url = get_nse_bhavcopy_url(target_date)
-    logger.info(f"Downloading NSE Bhavcopy from URL: {url}")
-    
-    session = requests.Session()
-    # Hit NSE India home page first to initialize session cookies
-    try:
-        session.get("https://www.nseindia.com", headers=HEADERS, timeout=10)
-    except Exception as e:
-        logger.warning(f"Failed to initialize NSE session cookies: {e}")
-        
-    response = session.get(url, headers=HEADERS, timeout=15)
-    if response.status_code == 404:
-        raise FileNotFoundError(f"NSE Bhavcopy not found for {target_date} (likely a market holiday or weekend)")
-    response.raise_for_status()
-    
-    return response.content
+
+    last_error: Optional[Exception] = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        logger.info(f"Downloading NSE Bhavcopy from URL: {url} (attempt {attempt}/{MAX_RETRIES})")
+        time.sleep(MIN_REQUEST_INTERVAL_SECONDS)
+
+        session = requests.Session()
+        try:
+            # Hit NSE India home page first to initialize session cookies
+            try:
+                session.get("https://www.nseindia.com", headers=HEADERS, timeout=10)
+            except Exception as e:
+                logger.warning(f"Failed to initialize NSE session cookies: {e}")
+
+            response = session.get(url, headers=HEADERS, timeout=15)
+            if response.status_code == 404:
+                raise FileNotFoundError(f"NSE Bhavcopy not found for {target_date} (likely a market holiday or weekend)")
+            response.raise_for_status()
+
+            content_type = response.headers.get("content-type", "")
+            if "zip" not in content_type and response.content[:2] != b"PK":
+                # NSE's anti-bot layer often responds 200 with an HTML challenge
+                # page instead of a real zip. Treat that as a retryable failure.
+                raise ValueError(
+                    f"NSE response for {target_date} did not look like a zip file "
+                    f"(content-type={content_type!r}) - likely blocked by anti-bot protection"
+                )
+
+            return response.content
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            last_error = e
+            if attempt < MAX_RETRIES:
+                backoff = BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                logger.warning(
+                    f"NSE Bhavcopy download attempt {attempt}/{MAX_RETRIES} failed for {target_date}: {e}. "
+                    f"Retrying in {backoff:.1f}s..."
+                )
+                time.sleep(backoff)
+        finally:
+            session.close()
+
+    raise RuntimeError(
+        f"NSE Bhavcopy download failed for {target_date} after {MAX_RETRIES} attempts: {last_error}"
+    ) from last_error
 
 def parse_nse_bhavcopy_csv(csv_content: str, target_date: date) -> List[Dict[str, Any]]:
     """

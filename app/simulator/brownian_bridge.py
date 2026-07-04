@@ -126,6 +126,25 @@ def generate_brownian_bridge_ticks(
         
     return ticks
 
+def tick_cache_key(exchange: str, segment: str, symbol: str, target_date: date, version: int) -> str:
+    """
+    Builds the tick cache key, namespaced by the source EOD record's `version`.
+
+    This matters because the Brownian Bridge path is generated FROM the
+    EOD open/high/low/close - if a correction changes those values (see
+    price_data versioning in db/models.py), replaying the SAME seed against
+    DIFFERENT OHLC produces a materially different tick path. Without the
+    version in the key, a session that started replaying under the old
+    (pre-correction) values could have its cached ticks silently mutate
+    mid-session, or a corrected day could keep serving stale pre-correction
+    ticks until the old cache entry's TTL expires. Namespacing by version
+    means each version's tick path is independent and stable for as long as
+    it's cached: old replay sessions keep reading what they started with,
+    and new sessions naturally pick up the corrected version's ticks.
+    """
+    return f"ticks:{exchange.upper()}:{segment.upper()}:{symbol.upper()}:{target_date.isoformat()}:v{version}"
+
+
 async def ensure_ticks_cached(
     db: AsyncSession,
     exchange: str,
@@ -135,21 +154,14 @@ async def ensure_ticks_cached(
     eod_data: Optional[PriceData] = None
 ) -> bool:
     """
-    Checks if ticks are cached in Redis. If not, fetches EOD data, 
+    Checks if ticks are cached in Redis. If not, fetches EOD data,
     generates simulated ticks using the Brownian Bridge, and caches them.
     Returns True if ticks are ready in cache, False if no EOD source data is found.
     """
-    cache_key = f"ticks:{exchange.upper()}:{segment.upper()}:{symbol.upper()}:{target_date.isoformat()}"
-    
-    # Check if already cached
-    cached = await get_cached_response(cache_key)
-    if cached:
-        logger.info(f"Tick cache hit for {exchange}:{segment}:{symbol} on {target_date}")
-        return True
-        
-    # Cache miss - fetch EOD data if not preloaded
+    # Cache miss - fetch EOD data if not preloaded (needed for both the
+    # version-namespaced cache key and, on a miss, tick generation itself).
     if not eod_data:
-        logger.info(f"Tick cache miss for {exchange}:{segment}:{symbol} on {target_date}. Fetching EOD data...")
+        logger.info(f"Fetching current EOD data for {exchange}:{segment}:{symbol} on {target_date}...")
         eod_data = await get_eligible_data(
             db=db,
             symbol=symbol,
@@ -157,11 +169,18 @@ async def ensure_ticks_cached(
             segment=segment,
             market_timestamp=target_date
         )
-    
+
     if not eod_data:
         logger.warning(f"No EOD data found for {exchange}:{segment}:{symbol} on {target_date}")
         return False
-        
+
+    cache_key = tick_cache_key(exchange, segment, symbol, target_date, eod_data.version)
+
+    cached = await get_cached_response(cache_key)
+    if cached:
+        logger.info(f"Tick cache hit for {exchange}:{segment}:{symbol} on {target_date} (version {eod_data.version})")
+        return True
+
     # Generate ticks
     ticks = generate_brownian_bridge_ticks(
         open_price=float(eod_data.open),
@@ -172,8 +191,11 @@ async def ensure_ticks_cached(
         target_date=target_date,
         symbol=symbol
     )
-    
+
     # Cache ticks (24 hours TTL)
     await set_cached_response(cache_key, json.dumps(ticks), ttl=86400)
-    logger.info(f"Generated and cached {len(ticks)} ticks for {exchange}:{segment}:{symbol} on {target_date}")
+    logger.info(
+        f"Generated and cached {len(ticks)} ticks for {exchange}:{segment}:{symbol} "
+        f"on {target_date} (version {eod_data.version})"
+    )
     return True

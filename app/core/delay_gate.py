@@ -32,36 +32,48 @@ async def get_eligible_data(
     strike: Optional[float] = None,
     option_type: Optional[str] = None,
     market_timestamp: Optional[date] = None,
-    current_date: Optional[date] = None
+    current_date: Optional[date] = None,
+    version: Optional[int] = None
 ) -> Optional[PriceData]:
     """
     COMPLIANCE-CRITICAL FUNCTION:
     Enforces the N-day delay gate for a specific instrument query.
     Supports Cash Equities, F&O derivatives, and Commodities.
+
+    By default returns only the current (non-superseded) version of a record,
+    i.e. the latest EOD value after any corrections. Pass `version` to
+    retrieve a specific historical version instead (e.g. for audit, to see
+    what a tick replay session saw before a correction was applied) - this
+    bypasses the "current only" filter but still enforces the delay gate.
     """
     cutoff = get_delay_cutoff(current_date)
-    
+
     # 1. Enforce strict compliance check on requested timestamp
     if market_timestamp is not None:
         if market_timestamp > cutoff:
             raise ValueError(
                 f"Requested market_timestamp {market_timestamp} falls within the restricted {settings.DELAY_DAYS}-day window (cutoff: {cutoff})"
             )
-            
+
     # 2. Build filter conditions
     conditions = [
         PriceData.symbol == symbol.upper(),
         PriceData.exchange == exchange.upper(),
         PriceData.segment == segment.upper()
     ]
-    
+
     if expiry is not None:
         conditions.append(PriceData.expiry == expiry)
     if strike is not None:
         conditions.append(PriceData.strike == strike)
     if option_type is not None:
         conditions.append(PriceData.option_type == option_type.upper())
-        
+
+    if version is not None:
+        conditions.append(PriceData.version == version)
+    else:
+        conditions.append(PriceData.superseded_at.is_(None))
+
     if market_timestamp is not None:
         conditions.append(PriceData.market_timestamp == market_timestamp)
         stmt = select(PriceData).where(and_(*conditions))
@@ -74,7 +86,7 @@ async def get_eligible_data(
             .order_by(desc(PriceData.market_timestamp))
             .limit(1)
         )
-        
+
     result = await db.execute(stmt)
     return result.scalars().first()
 
@@ -109,22 +121,26 @@ async def get_eligible_range(
         PriceData.exchange == exchange.upper(),
         PriceData.segment == segment.upper(),
         PriceData.market_timestamp >= start_date,
-        PriceData.market_timestamp <= actual_end_date
+        PriceData.market_timestamp <= actual_end_date,
+        # Only the current (non-superseded) version of each day - a range
+        # query should reflect the latest known-correct history, not a mix
+        # of stale and corrected values for different days in the range.
+        PriceData.superseded_at.is_(None),
     ]
-    
+
     if expiry is not None:
         conditions.append(PriceData.expiry == expiry)
     if strike is not None:
         conditions.append(PriceData.strike == strike)
     if option_type is not None:
         conditions.append(PriceData.option_type == option_type.upper())
-        
+
     stmt = (
         select(PriceData)
         .where(and_(*conditions))
         .order_by(PriceData.market_timestamp)
     )
-    
+
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
@@ -144,7 +160,8 @@ async def get_eligible_symbols(
             and_(
                 PriceData.exchange == exchange.upper(),
                 PriceData.segment == segment.upper(),
-                PriceData.market_timestamp <= cutoff
+                PriceData.market_timestamp <= cutoff,
+                PriceData.superseded_at.is_(None),
             )
         )
         .distinct()

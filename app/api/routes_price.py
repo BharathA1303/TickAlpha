@@ -3,12 +3,13 @@ import logging
 from datetime import date
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.db.models import APIKey
+from app.db.models import APIKey, PriceData
 from app.core.auth import verify_jwt_token
-from app.core.delay_gate import get_eligible_data, get_eligible_range
+from app.core.delay_gate import get_eligible_data, get_eligible_range, get_delay_cutoff
 from app.core.cache import get_cached_response, set_cached_response
 
 logger = logging.getLogger(__name__)
@@ -145,5 +146,78 @@ async def get_price_range(
     # 4. Serialize and Cache Gated Results
     results_list = [record.to_dict() for record in price_records]
     await set_cached_response(cache_key, json.dumps(results_list), ttl=60)
-    
+
     return results_list
+
+
+@router.get("/{exchange}/{symbol}/history")
+async def get_price_correction_history(
+    exchange: str,
+    symbol: str,
+    date_: date = Query(..., alias="date", description="Trading date to inspect (YYYY-MM-DD)"),
+    segment: str = Query("EQ", description="Segment (EQ, FUT, OPT)"),
+    expiry: Optional[date] = Query(None, description="Expiry date for derivatives (YYYY-MM-DD)"),
+    strike: Optional[float] = Query(None, description="Strike price for options"),
+    option_type: Optional[str] = Query(None, description="Option type (CE, PE)"),
+    db: AsyncSession = Depends(get_db),
+    client: APIKey = Depends(verify_jwt_token)
+):
+    """
+    Returns every stored version of a single day's EOD record, oldest first,
+    including any superseded (corrected) versions. Intended for audit: e.g.
+    to see exactly what values a tick replay session would have used before
+    a later correction was applied. The delay gate still applies to `date`.
+    Does not use the response cache, since it is an audit path rather than
+    the hot read path.
+    """
+    exchange_upper = exchange.upper()
+    symbol_upper = symbol.upper()
+    segment_upper = segment.upper()
+
+    required_scope = f"{exchange_upper.lower()}:{segment_upper.lower()}"
+    if required_scope not in client.scopes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access token missing required scope: {required_scope}",
+        )
+    _check_symbol_allowed(client, exchange_upper, segment_upper, symbol_upper)
+
+    cutoff = get_delay_cutoff()
+    if date_ > cutoff:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Requested date {date_} is restricted. Maximum allowed date is {cutoff} (3-day delay)."
+        )
+
+    conditions = [
+        PriceData.symbol == symbol_upper,
+        PriceData.exchange == exchange_upper,
+        PriceData.segment == segment_upper,
+        PriceData.market_timestamp == date_,
+    ]
+    if expiry is not None:
+        conditions.append(PriceData.expiry == expiry)
+    if strike is not None:
+        conditions.append(PriceData.strike == strike)
+    if option_type is not None:
+        conditions.append(PriceData.option_type == option_type.upper())
+
+    stmt = select(PriceData).where(and_(*conditions)).order_by(PriceData.version)
+    result = await db.execute(stmt)
+    versions = list(result.scalars().all())
+
+    if not versions:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No EOD price data found for {exchange_upper}:{segment_upper}:{symbol_upper} on {date_}"
+        )
+
+    return {
+        "exchange": exchange_upper,
+        "segment": segment_upper,
+        "symbol": symbol_upper,
+        "market_timestamp": date_.isoformat(),
+        "version_count": len(versions),
+        "was_corrected": len(versions) > 1,
+        "versions": [v.to_dict() for v in versions],
+    }

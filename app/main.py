@@ -66,38 +66,55 @@ async def lifespan(app: FastAPI):
     
     # 2. Initialize Redis Cache / Rate Limiter
     await init_redis()
-    
+
     # 3. Start Tick Simulation Engine
-    logger.info("Starting tick simulation engine background runner...")
-    await simulator_manager.start()
-    
+    # This background loop is a process-wide singleton: if multiple API
+    # replicas each ran it, every replica would independently advance the
+    # same session clocks and broadcast duplicate ticks. When scaling out
+    # (multiple uvicorn/gunicorn workers or replicas), set
+    # ENABLE_SIMULATOR_LOOP=false on all but one dedicated process (see
+    # docker-compose.yml's `scheduler` service, which sets it True while the
+    # `api` service sets it False).
+    if settings.ENABLE_SIMULATOR_LOOP:
+        logger.info("Starting tick simulation engine background runner...")
+        await simulator_manager.start()
+    else:
+        logger.info("ENABLE_SIMULATOR_LOOP=false — skipping simulator clock loop on this process (handled elsewhere).")
+
     # 4. Initialize & Start APScheduler for Nightly Ingestion
-    logger.info("Starting background scheduler...")
-    # Schedule nightly ingestion run at 19:00 (7:00 PM) everyday
-    scheduler.add_job(
-        scheduled_nightly_ingestion,
-        trigger="cron",
-        hour=19,
-        minute=0,
-        id="nightly_ingestion",
-        replace_existing=True
-    )
-    scheduler.start()
-    logger.info("Scheduler started successfully.")
-    
+    # Same singleton concern as above: only one process should own the cron
+    # job, otherwise nightly ingestion would run once per replica.
+    if settings.ENABLE_SCHEDULER:
+        logger.info("Starting background scheduler...")
+        # Schedule nightly ingestion run at 19:00 (7:00 PM) everyday
+        scheduler.add_job(
+            scheduled_nightly_ingestion,
+            trigger="cron",
+            hour=19,
+            minute=0,
+            id="nightly_ingestion",
+            replace_existing=True
+        )
+        scheduler.start()
+        logger.info("Scheduler started successfully.")
+    else:
+        logger.info("ENABLE_SCHEDULER=false — skipping nightly ingestion scheduler on this process.")
+
     yield
-    
+
     # --- Shutdown ---
     logger.info("Shutting down alphasync-data-layer...")
-    
+
     # 1. Shutdown scheduler
-    scheduler.shutdown()
-    logger.info("Scheduler shut down.")
-    
+    if settings.ENABLE_SCHEDULER:
+        scheduler.shutdown()
+        logger.info("Scheduler shut down.")
+
     # 2. Stop Tick Simulation Engine
-    await simulator_manager.stop()
-    logger.info("Tick simulation engine stopped.")
-    
+    if settings.ENABLE_SIMULATOR_LOOP:
+        await simulator_manager.stop()
+        logger.info("Tick simulation engine stopped.")
+
     # 3. Close Redis Connection
     await close_redis()
 

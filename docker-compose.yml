@@ -31,6 +31,19 @@ services:
     build: .
     container_name: tickalpha-api
     restart: always
+    # Multiple stateless HTTP/WebSocket workers. Safe to scale this number up
+    # under load: request handling and WS fan-out use Postgres/Redis for all
+    # shared state, so workers don't need to coordinate directly. Uses
+    # gunicorn to manage the uvicorn worker pool with proper timeouts for
+    # long-lived WebSocket connections.
+    command: >
+      gunicorn app.main:app
+      -k uvicorn.workers.UvicornWorker
+      -w 4
+      -b 0.0.0.0:8000
+      --timeout 120
+      --graceful-timeout 30
+      --keep-alive 75
     ports:
       - "0.0.0.0:8003:8000"
     environment:
@@ -42,6 +55,42 @@ services:
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - LOG_LEVEL=info
+      # This process handles HTTP/WebSocket traffic only. The clock loop and
+      # nightly ingestion cron run exclusively in the `scheduler` service
+      # below so they aren't duplicated across these 4 workers.
+      - ENABLE_SIMULATOR_LOOP=false
+      - ENABLE_SCHEDULER=false
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+
+  # Dedicated single-instance process that owns the two process-wide
+  # singletons: the simulator's tick clock loop and the nightly ingestion
+  # cron. Running these here (and nowhere else) means the `api` service can
+  # be scaled to any number of workers/replicas without duplicating ticks or
+  # re-running ingestion multiple times. It shares the same Postgres/Redis as
+  # the API workers, so sessions created via the API are visible here and
+  # vice versa.
+  scheduler:
+    build: .
+    container_name: tickalpha-scheduler
+    restart: always
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_USER=alphasync_user
+      - POSTGRES_PASSWORD=alphasync_password
+      - POSTGRES_DB=alphasync_data
+      - REDIS_HOST=redis
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=info
+      - ENABLE_SIMULATOR_LOOP=true
+      - ENABLE_SCHEDULER=true
     depends_on:
       db:
         condition: service_healthy

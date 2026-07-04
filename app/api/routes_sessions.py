@@ -18,6 +18,15 @@ from app.simulator.brownian_bridge import ensure_ticks_cached
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/sessions", tags=["Replay Sessions"])
 
+# Sessions never auto-complete: once the virtual clock reaches market close
+# (15:30), SimulatorManager rolls the session over to the next available
+# trading day and resets the clock to 09:15 rather than stopping (see
+# SimulatorManager.process_active_session). This lets a session run
+# indefinitely - a dev/testing convenience so tick delivery isn't tied to
+# real-world market hours and a session doesn't need to be recreated every
+# simulated day. "completed" is retained as a legacy status value but is no
+# longer set anywhere in the active code path.
+
 import datetime
 
 # Pydantic models
@@ -176,11 +185,23 @@ async def subscribe_symbols(
         )
         
     target_date = date.fromisoformat(state["date"])
-    
+
     current_subs = set(state["subscriptions"])
-    
-    # Preload all EOD records for this date in a single batch query to avoid N+1 database queries
-    stmt = select(PriceData).where(PriceData.market_timestamp == target_date)
+    # Maps resolved_spec ("EXCHANGE:SEGMENT:SYMBOL") -> the price_data.version
+    # this session subscribed against, so the clock loop reads the exact
+    # same tick path for the rest of this session's life even if a
+    # correction lands (a new version) after the session started. Persisted
+    # into session state below as "subscription_versions".
+    subscription_versions = dict(state.get("subscription_versions", {}))
+
+    # Preload only the CURRENT (non-superseded) EOD records for this date in
+    # a single batch query to avoid N+1 database queries. Filtering to the
+    # current version avoids accidentally picking up a stale superseded row
+    # for symbols that have been corrected.
+    stmt = select(PriceData).where(
+        PriceData.market_timestamp == target_date,
+        PriceData.superseded_at.is_(None),
+    )
     res = await db.execute(stmt)
     all_eod_rows = res.scalars().all()
     eod_map = {
@@ -272,8 +293,13 @@ async def subscribe_symbols(
                     )
             
             current_subs.add(resolved_spec)
-        
+            # Pin this subscription to the version that was current at
+            # subscribe-time, so a later correction doesn't change the ticks
+            # this session streams mid-replay.
+            subscription_versions[resolved_spec] = eod_obj.version
+
     state["subscriptions"] = list(current_subs)
+    state["subscription_versions"] = subscription_versions
     await save_session_state(session_id, state)
     logger.info(f"Session {session_id} subscribed in bulk to: {req.symbols} -> Resolved size: {len(current_subs)}")
     return state

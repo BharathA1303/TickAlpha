@@ -10,6 +10,17 @@ class PriceData(Base):
     """
     Table to store daily EOD OHLCV data for equities, F&O derivatives, and commodities.
     Compliance: All read queries to this table MUST pass through the delay gate.
+
+    Versioning: exchanges occasionally re-issue a corrected bhavcopy for a date
+    that was already ingested (or an admin re-runs ingestion for a bad day).
+    Rather than overwriting OHLCV in place - which would silently change the
+    numbers behind a tick replay that a client may have already started or
+    cached - each correction is stored as a NEW row with an incremented
+    `version`, and the previous row is marked `superseded_at` instead of being
+    deleted. Exactly one row per (symbol, exchange, segment, expiry, strike,
+    option_type, market_timestamp) has `superseded_at IS NULL` at any time -
+    that is the "current" version read by default. Old versions remain
+    queryable for audit via `?version=N`.
     """
     __tablename__ = "price_data"
 
@@ -17,13 +28,13 @@ class PriceData(Base):
     symbol = Column(String(50), nullable=False)
     exchange = Column(String(10), nullable=False)  # "NSE", "BSE", "MCX"
     segment = Column(String(10), nullable=False, default="EQ")  # "EQ", "FUT", "OPT"
-    
+
     # Contract specs with non-null defaults to ensure PostgreSQL UniqueConstraint triggers on duplicates
     expiry = Column(Date, nullable=False, server_default='1970-01-01', default=datetime.date(1970, 1, 1))
     strike = Column(Numeric(15, 4), nullable=False, server_default='0.0', default=0.0)
     option_type = Column(String(10), nullable=False, server_default='XX', default='XX')  # "CE", "PE", "XX"
     open_interest = Column(BigInteger, nullable=False, server_default='0', default=0)
-    
+
     market_timestamp = Column(Date, nullable=False)  # The actual trading date
     open = Column(Numeric(15, 4), nullable=False)
     high = Column(Numeric(15, 4), nullable=False)
@@ -32,13 +43,32 @@ class PriceData(Base):
     volume = Column(BigInteger, nullable=False)
     ingested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
+    # Versioning fields (see class docstring)
+    version = Column(Integer, nullable=False, server_default='1', default=1)
+    superseded_at = Column(DateTime(timezone=True), nullable=True)
+
     __table_args__ = (
         UniqueConstraint(
-            "symbol", "exchange", "segment", "expiry", "strike", "option_type", "market_timestamp",
-            name="uq_price_data_symbol_exchange_segment_date"
+            "symbol", "exchange", "segment", "expiry", "strike", "option_type", "market_timestamp", "version",
+            name="uq_price_data_symbol_exchange_segment_date_version"
         ),
         Index("idx_price_data_symbol_date", "symbol", "market_timestamp"),
         Index("idx_price_data_lookup", "exchange", "segment", "symbol", "market_timestamp"),
+        # Partial index (and de-facto "at most one current version per key"
+        # guard) covering only the live row for each key - this is the index
+        # every normal read hits, since normal reads filter on
+        # superseded_at IS NULL. Dialect-specific `_where` kwargs are needed
+        # per-backend (e.g. SQLite in tests): a bare `Index(..., unique=True)`
+        # would silently drop the WHERE clause on dialects that don't get an
+        # explicit kwarg, turning this into a plain (non-partial) unique
+        # index that would then reject every correction's new version.
+        Index(
+            "idx_price_data_current_version",
+            "symbol", "exchange", "segment", "expiry", "strike", "option_type", "market_timestamp",
+            unique=True,
+            postgresql_where=(superseded_at.is_(None)),
+            sqlite_where=(superseded_at.is_(None)),
+        ),
     )
 
     def to_dict(self):
@@ -47,7 +77,7 @@ class PriceData(Base):
         strike_val = float(self.strike) if self.strike is not None and float(self.strike) != 0.0 else None
         opt_val = self.option_type if self.option_type != "XX" else None
         oi_val = self.open_interest if self.open_interest != 0 else None
-        
+
         return {
             "id": self.id,
             "symbol": self.symbol,
@@ -64,6 +94,9 @@ class PriceData(Base):
             "close": float(self.close) if self.close is not None else None,
             "volume": self.volume,
             "ingested_at": self.ingested_at.isoformat() if self.ingested_at else None,
+            "version": self.version,
+            "is_current": self.superseded_at is None,
+            "superseded_at": self.superseded_at.isoformat() if self.superseded_at else None,
         }
 
 

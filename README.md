@@ -73,9 +73,10 @@ Spin up the PostgreSQL database, Redis caching, and the FastAPI application usin
 docker-compose up --build
 ```
 This deploys the following services:
-*   **FastAPI Backend Server**: `http://localhost:8000` (docs: `http://localhost:8000/docs`)
+*   **`api`**: 4 stateless Gunicorn/Uvicorn workers handling all REST + WebSocket traffic — `http://localhost:8003` (docs: `http://localhost:8003/docs`). Scale this service (`docker-compose up --scale api=N`) if you need more HTTP throughput.
+*   **`scheduler`**: a single dedicated process that owns the tick simulation clock loop and the nightly ingestion cron — see [architecture.md](architecture.md#6-process-topology--horizontal-scaling) for why this must stay a singleton while `api` scales freely.
 *   **Postgres Database**: `localhost:5432`
-*   **Redis Engine**: `localhost:6379`
+*   **Redis Engine**: `localhost:6379` — required for cross-worker session state and tick broadcast; the in-memory fallback only works correctly for a single process.
 
 *Note: The FastAPI container automatically initiates database migrations and tables on startup.*
 

@@ -1,5 +1,6 @@
 import logging
 import secrets
+from datetime import date, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status, HTTPException
 from pydantic import BaseModel, Field
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.db.models import APIKey, IngestionLog
 from app.core.auth import verify_jwt_token, require_admin, hash_secret
+from app.ingestion.run_ingestion import is_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +85,66 @@ async def get_ingestion_status(
     logs = result.scalars().all()
 
     return [log.to_dict() for log in logs]
+
+
+@router.get("/health")
+async def get_ingestion_health(
+    lookback_days: int = Query(7, ge=1, le=30, description="How many trailing trading days to check for gaps"),
+    db: AsyncSession = Depends(get_db),
+    client: APIKey = Depends(verify_jwt_token)
+):
+    """
+    Reports whether nightly ingestion is up to date, for use by external
+    monitoring/alerting (or the admin console) rather than having to grep logs.
+    Flags any trading day in the lookback window where both NSE and BSE
+    ingestion logged zero rows (a strong signal of a blocked/broken source),
+    and reports how many days have passed since the last successful run.
+    """
+    if "admin" not in client.scopes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required to view ingestion health"
+        )
+
+    today = date.today()
+    problem_dates: List[str] = []
+    last_success_date: Optional[date] = None
+
+    for i in range(lookback_days):
+        check_date = today - timedelta(days=i)
+        if not is_trading_day(check_date):
+            continue
+
+        stmt = select(IngestionLog).where(IngestionLog.target_date == check_date)
+        result = await db.execute(stmt)
+        day_logs = result.scalars().all()
+
+        rows_by_source = {log.source: log.rows_ingested for log in day_logs}
+        total_rows = sum(rows_by_source.values())
+
+        if not day_logs:
+            problem_dates.append(check_date.isoformat())
+        elif total_rows == 0:
+            problem_dates.append(check_date.isoformat())
+        elif last_success_date is None:
+            last_success_date = check_date
+
+    is_healthy = len(problem_dates) == 0
+    days_since_success = (today - last_success_date).days if last_success_date else None
+
+    return {
+        "status": "healthy" if is_healthy else "degraded",
+        "lookback_days": lookback_days,
+        "last_successful_ingestion_date": last_success_date.isoformat() if last_success_date else None,
+        "days_since_last_success": days_since_success,
+        "problem_trading_days": problem_dates,
+        "message": (
+            "Ingestion is up to date."
+            if is_healthy
+            else f"{len(problem_dates)} trading day(s) in the lookback window have missing or zero-row ingestion. "
+                 f"Check ingestion_log for error_message details (likely NSE/BSE source blocking)."
+        )
+    }
 
 @admin_keys_router.post("/keys", response_model=KeyGenerateResponse, status_code=status.HTTP_201_CREATED)
 async def generate_client_credentials(
