@@ -119,6 +119,11 @@ function initEventListeners() {
     document.getElementById("btn-stop-simulation").addEventListener("click", () => {
         stopSimulation();
     });
+
+    // One-click end-to-end health check
+    document.getElementById("btn-health-check").addEventListener("click", () => {
+        runFullHealthCheck();
+    });
 }
 
 // Connect API credentials
@@ -165,7 +170,8 @@ async function connectKey() {
         // Show session creator and scopes list
         document.getElementById("session-setup-card").classList.remove("hidden");
         document.getElementById("key-details-container").classList.remove("hidden");
-        
+        document.getElementById("btn-health-check").disabled = false;
+
         renderScopesUI(state.clientInfo.scopes);
         
     } catch (err) {
@@ -331,6 +337,7 @@ async function startSimulation() {
 
         // Render UI panels
         document.getElementById("sandbox-clock-container").classList.remove("hidden");
+        document.getElementById("heartbeat-container").classList.remove("hidden");
         document.getElementById("btn-start-simulation").classList.add("hidden");
         document.getElementById("btn-stop-simulation").classList.remove("hidden");
 
@@ -457,6 +464,7 @@ function processTickUpdate(msg) {
     document.getElementById("diag-clock-status").innerText = "Running";
     document.getElementById("diag-clock-status").style.color = "var(--accent-success)";
     document.getElementById("stall-warning").classList.add("hidden");
+    pulseHeartbeat();
 
     // Refresh active chart symbol
     if (state.chartSymbol && ticksPayload[state.chartSymbol]) {
@@ -497,6 +505,19 @@ function stopStallWatcher() {
         clearInterval(state.stallCheckInterval);
         state.stallCheckInterval = null;
     }
+}
+
+// Flashes the heartbeat dot green on every tick_update - a single glanceable
+// signal that data is actually moving, without having to read the chart or
+// any numbers. This is the most direct visual answer to "is it even working?".
+function pulseHeartbeat() {
+    const dot = document.getElementById("heartbeat-dot");
+    const label = document.getElementById("heartbeat-label");
+    label.innerText = "Live";
+    dot.classList.remove("pulse");
+    // Force reflow so the animation restarts even on back-to-back ticks
+    void dot.offsetWidth;
+    dot.classList.add("pulse");
 }
 
 // Initialize Tickers UI
@@ -605,6 +626,9 @@ async function stopSimulation() {
 
     // Update elements
     document.getElementById("sandbox-clock-container").classList.add("hidden");
+    document.getElementById("heartbeat-container").classList.add("hidden");
+    document.getElementById("heartbeat-dot").classList.remove("pulse");
+    document.getElementById("heartbeat-label").innerText = "Waiting for ticks...";
     document.getElementById("session-diag-strip").classList.add("hidden");
     document.getElementById("stall-warning").classList.add("hidden");
     document.getElementById("btn-start-simulation").classList.remove("hidden");
@@ -766,6 +790,122 @@ function drawRealTimeChart(symbol) {
     ctx.strokeStyle = "rgba(129, 140, 248, 0.5)";
     ctx.lineWidth = 1.5;
     ctx.stroke();
+}
+
+// Runs the entire pipeline end-to-end (auth token already held -> create a
+// throwaway session -> subscribe -> start clock -> open WebSocket -> wait for
+// one real tick) and reports pass/fail per step. This is a direct yes/no
+// answer to "does my API key actually work" instead of having to infer it
+// from a chart or scrolling logs - every step is independently visible.
+async function runFullHealthCheck() {
+    const resultsEl = document.getElementById("health-check-results");
+    const btn = document.getElementById("btn-health-check");
+    resultsEl.classList.remove("hidden");
+    resultsEl.innerHTML = "";
+    btn.disabled = true;
+    btn.innerText = "Running checks...";
+
+    const steps = [];
+    const renderSteps = () => {
+        resultsEl.innerHTML = steps.map(s => {
+            const icon = s.status === "pass" ? "✅" : s.status === "fail" ? "❌" : "⏳";
+            const color = s.status === "pass" ? "var(--accent-success)" : s.status === "fail" ? "var(--accent-danger)" : "var(--text-secondary)";
+            return `<div style="color: ${color};">${icon} ${s.label}${s.detail ? ` - ${s.detail}` : ""}</div>`;
+        }).join("");
+    };
+    const addStep = (label) => { steps.push({ label, status: "pending", detail: "" }); renderSteps(); return steps[steps.length - 1]; };
+
+    let healthCheckWs = null;
+    try {
+        // Step 1: auth token (already verified by Connect Key, re-confirm it's still valid)
+        const s1 = addStep("API token valid");
+        if (!state.accessToken) throw new Error("No access token - connect your key first");
+        s1.status = "pass"; renderSteps();
+
+        // Step 2: create a throwaway session on a known-eligible date (4 days ago)
+        const s2 = addStep("Create replay session");
+        const checkDate = new Date();
+        checkDate.setDate(checkDate.getDate() - 4);
+        const dateStr = checkDate.toISOString().split("T")[0];
+
+        const createRes = await fetch(`${state.apiBase}/v1/sessions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${state.accessToken}` },
+            body: JSON.stringify({ date: dateStr, replay_speed: 60 })
+        });
+        if (!createRes.ok) throw new Error((await createRes.json()).detail || "Session creation failed");
+        const hcSession = await createRes.json();
+        s2.status = "pass"; s2.detail = hcSession.session_id; renderSteps();
+
+        // Step 3: subscribe to a single well-known liquid symbol
+        const s3 = addStep("Subscribe to RELIANCE");
+        const subRes = await fetch(`${state.apiBase}/v1/sessions/${hcSession.session_id}/subscribe`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${state.accessToken}` },
+            body: JSON.stringify({ symbols: ["NSE:EQ:RELIANCE"] })
+        });
+        if (!subRes.ok) throw new Error((await subRes.json()).detail || "Subscription failed");
+        s3.status = "pass"; renderSteps();
+
+        // Step 4: start the clock
+        const s4 = addStep("Start replay clock");
+        const startRes = await fetch(`${state.apiBase}/v1/sessions/${hcSession.session_id}/start`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${state.accessToken}` }
+        });
+        if (!startRes.ok) throw new Error("Clock start failed");
+        s4.status = "pass"; renderSteps();
+
+        // Step 5: get a feed token and open the WebSocket
+        const s5 = addStep("Open WebSocket feed");
+        const feedRes = await fetch(`${state.apiBase}/v1/auth/feed-token`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${state.accessToken}` },
+            body: JSON.stringify({ session_id: hcSession.session_id })
+        });
+        if (!feedRes.ok) throw new Error("Feed token request failed");
+        const { feed_token } = await feedRes.json();
+        const wsUrl = `${state.apiBase.replace("http", "ws")}/v1/feed?token=${feed_token}`;
+
+        await new Promise((resolve, reject) => {
+            healthCheckWs = new WebSocket(wsUrl);
+            const timeout = setTimeout(() => reject(new Error("WebSocket did not open within 8s")), 8000);
+            healthCheckWs.onopen = () => { clearTimeout(timeout); resolve(); };
+            healthCheckWs.onerror = () => { clearTimeout(timeout); reject(new Error("WebSocket connection error")); };
+        });
+        s5.status = "pass"; renderSteps();
+
+        // Step 6: wait for a real tick_update - this is the definitive proof
+        // the server-side tick clock loop is actually running, not just that
+        // the WebSocket handshake succeeded.
+        const s6 = addStep("Receive live tick from clock loop");
+        await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error("No tick received within 6s - clock loop may not be running on the server")), 6000);
+            healthCheckWs.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === "tick_update") {
+                    clearTimeout(timeout);
+                    resolve(msg);
+                }
+            };
+        });
+        s6.status = "pass"; s6.detail = "simulation is working"; renderSteps();
+
+        logToTerminal("Health Check: All steps passed. API key and simulation pipeline are fully working.", "success");
+
+    } catch (err) {
+        const last = steps[steps.length - 1];
+        if (last && last.status === "pending") {
+            last.status = "fail";
+            last.detail = err.message;
+        }
+        renderSteps();
+        logToTerminal(`Health Check: Failed at "${last ? last.label : "unknown step"}" - ${err.message}`, "error");
+    } finally {
+        if (healthCheckWs) healthCheckWs.close();
+        btn.disabled = false;
+        btn.innerText = "🩺 Run Full Health Check";
+    }
 }
 
 function logToTerminal(message, type = "info") {

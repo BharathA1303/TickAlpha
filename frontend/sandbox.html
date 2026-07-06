@@ -320,6 +320,18 @@
             to { transform: rotate(360deg); }
         }
 
+        #heartbeat-dot.pulse {
+            background: var(--accent-success) !important;
+            box-shadow: 0 0 12px 2px rgba(16, 185, 129, 0.7) !important;
+            animation: heartbeat-pulse 0.4s ease-out;
+        }
+
+        @keyframes heartbeat-pulse {
+            0% { transform: scale(1); }
+            30% { transform: scale(1.7); }
+            100% { transform: scale(1); }
+        }
+
         .chart-container {
             position: relative;
             background-color: #0b0f19;
@@ -515,6 +527,11 @@
                         <button type="submit" class="btn btn-gradient" id="btn-connect" style="width: 100%; margin-top: 20px; font-weight: 600; padding: 12px;">Connect Key</button>
                     </form>
 
+                    <!-- One-click end-to-end pipeline check: auth -> session -> subscribe -> start -> websocket -> first tick.
+                         Answers "does my key actually work, end to end" without needing to read a chart or the logs. -->
+                    <button type="button" class="btn secondary-btn" id="btn-health-check" style="width: 100%; margin-top: 12px; font-weight: 600; padding: 10px;" disabled>🩺 Run Full Health Check</button>
+                    <div id="health-check-results" class="hidden" style="margin-top: 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12px;"></div>
+
                     <!-- Backend connectivity: API reachable + tick clock loop actually running -->
                     <div style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 14px; display: flex; flex-direction: column; gap: 8px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px;">
@@ -643,6 +660,13 @@
                             <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;" id="lbl-active-spec">Start a simulation to stream live candlestick feeds</p>
                         </div>
                         
+                        <!-- Live Heartbeat: pulses visibly on every tick received, so motion is
+                             obvious at a glance without having to read the chart or numbers. -->
+                        <div class="clock-container hidden" id="heartbeat-container" style="margin-right: 10px;">
+                            <span id="heartbeat-dot" style="width: 10px; height: 10px; border-radius: 50%; background: #4b5563; display: inline-block; transition: background-color 0.1s ease, box-shadow 0.1s ease;"></span>
+                            <span id="heartbeat-label">Waiting for ticks...</span>
+                        </div>
+
                         <!-- Digital Clock -->
                         <div class="clock-container hidden" id="sandbox-clock-container">
                             <span class="clock-icon">🕒</span>
