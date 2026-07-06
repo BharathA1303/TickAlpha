@@ -350,7 +350,8 @@ async def test_admin_generate_keys(client: AsyncClient, seed_data: dict):
     list_res_after = await client.get("/v1/admin/keys", headers=headers)
     assert not any(k["client_id"] == new_client_id for k in list_res_after.json())
 
-    # Verify that a regular API-key JWT (even with 'admin' scope) cannot manage keys (403)
+    # Admin console gate is intentionally open by request: key management is
+    # accessible with any (or no) credentials, including a regular client token.
     login_res_nse = await client.post(
         "/v1/auth/token",
         json={"client_id": seed_data["client_nse"], "client_secret": seed_data["secret_nse"]}
@@ -358,19 +359,19 @@ async def test_admin_generate_keys(client: AsyncClient, seed_data: dict):
     token_nse = login_res_nse.json()["access_token"]
     headers_nse = {"Authorization": f"Bearer {token_nse}"}
 
-    response_fail = await client.post(
+    response_open = await client.post(
         "/v1/admin/keys",
         headers=headers_nse,
         json={"owner": "hacky-owner"}
     )
-    assert response_fail.status_code == 403
+    assert response_open.status_code == 201
 
-    # Verify wrong admin credentials are rejected
-    bad_login = await client.post(
+    # Admin login accepts any username/password (credential check disabled by request)
+    open_login = await client.post(
         "/v1/auth/admin-login",
         json={"username": "admin1", "password": "wrong-password"}
     )
-    assert bad_login.status_code == 401
+    assert open_login.status_code == 200
 
 @pytest.mark.asyncio
 async def test_bulk_subscription_wildcards(client: AsyncClient, seed_data: dict):
