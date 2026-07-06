@@ -6,8 +6,13 @@ const state = {
     websocket: null,
     ticksData: {}, // symbol -> array of {t: time_str, p: price, v: volume}
     chartSymbol: null,
-    apiBase: window.location.origin
+    apiBase: window.location.origin,
+    totalTicksReceived: 0,
+    lastTickAt: null, // Date.now() of the most recent tick_update message
+    stallCheckInterval: null
 };
+
+const STALL_THRESHOLD_MS = 5000;
 
 // Canvas Chart Configuration
 const chartConfig = {
@@ -20,10 +25,32 @@ const chartConfig = {
 // Initialize Application
 document.addEventListener("DOMContentLoaded", () => {
     initChart();
-    prepopulateParams();
     setDefaultDate();
     initEventListeners();
+    checkApiServerStatus();
+    prepopulateParams();
 });
+
+// Confirms the API is reachable and reports whether the tick clock loop is
+// running on this process (it's a separate `scheduler` process/container -
+// see docker-compose.yml - so the API can be perfectly healthy while no
+// clock loop anywhere is actually advancing sessions).
+async function checkApiServerStatus() {
+    const apiStatusEl = document.getElementById("diag-api-status");
+    try {
+        const res = await fetch(`${state.apiBase}/health`);
+        if (!res.ok) throw new Error("Unhealthy");
+        await res.json();
+        apiStatusEl.innerText = "Reachable";
+        apiStatusEl.style.color = "var(--accent-success)";
+    } catch (e) {
+        apiStatusEl.innerText = "Unreachable";
+        apiStatusEl.style.color = "var(--accent-danger)";
+    }
+    // The clock loop's actual status can only be observed indirectly, by
+    // whether an active session receives ticks - see startStallWatcher().
+    document.getElementById("diag-clock-status").innerText = "Awaiting active session...";
+}
 
 function initChart() {
     chartConfig.canvas = document.getElementById("sandbox-chart-canvas");
@@ -49,16 +76,17 @@ function prepopulateParams() {
     const params = new URLSearchParams(window.location.search);
     const clientId = params.get("client_id");
     const clientSecret = params.get("client_secret");
-    
+
     if (clientId) {
         document.getElementById("client-id").value = clientId;
     }
     if (clientSecret) {
         document.getElementById("client-secret").value = clientSecret;
     }
-    
+
     if (clientId && clientSecret) {
-        logToTerminal("Sandbox: Credentials detected in parameters. Ready to connect.");
+        logToTerminal("Sandbox: Credentials detected in URL. Auto-connecting...");
+        connectKey();
     }
 }
 
@@ -305,14 +333,25 @@ async function startSimulation() {
         document.getElementById("sandbox-clock-container").classList.remove("hidden");
         document.getElementById("btn-start-simulation").classList.add("hidden");
         document.getElementById("btn-stop-simulation").classList.remove("hidden");
-        
+
         // Select first active symbol for charting
         state.chartSymbol = state.activeSession.subscriptions[0];
         document.getElementById("lbl-active-symbol").innerText = state.chartSymbol.split(":")[2];
         document.getElementById("lbl-active-spec").innerText = state.chartSymbol;
-        
+
         initLtpFeedUI(state.activeSession.subscriptions);
-        
+
+        // Reset & show real session diagnostics (session id, date, tick counter, staleness)
+        state.totalTicksReceived = 0;
+        state.lastTickAt = null;
+        document.getElementById("session-diag-strip").classList.remove("hidden");
+        document.getElementById("diag-session-id").innerText = state.activeSession.session_id;
+        document.getElementById("diag-session-date").innerText = state.activeSession.date;
+        document.getElementById("diag-tick-count").innerText = "0";
+        document.getElementById("diag-last-tick-age").innerText = "Waiting for first tick...";
+        document.getElementById("diag-clock-status").innerText = "Waiting for first tick...";
+        startStallWatcher();
+
     } catch (err) {
         logToTerminal(`Error: Failed to initiate simulation - ${err.message}`, "error");
         alert(err.message);
@@ -367,12 +406,13 @@ async function initWebSocketFeed(sessionId) {
         };
         
         state.websocket.onerror = (e) => {
-            logToTerminal("WebSocket Error occurred.", "error");
+            logToTerminal("WebSocket Error occurred. Check that the API server is reachable and the feed token hasn't expired (60s single-use).", "error");
         };
 
         state.websocket.onclose = () => {
             logToTerminal("WebSocket: Connection closed.");
             document.getElementById("log-connection-type").innerText = "Offline";
+            stopStallWatcher();
         };
 
     } catch (e) {
@@ -385,36 +425,77 @@ async function initWebSocketFeed(sessionId) {
 function processTickUpdate(msg) {
     // Update digital Clock
     document.getElementById("sandbox-clock-val").innerText = msg.virtual_time;
-    
+
     const ticksPayload = msg.ticks;
-    
+    let tickCountThisMessage = 0;
+
     // Merge ticks data
     for (const spec in ticksPayload) {
         if (!state.ticksData[spec]) {
             state.ticksData[spec] = [];
         }
-        
+
         const receivedTicks = ticksPayload[spec];
+        tickCountThisMessage += receivedTicks.length;
         state.ticksData[spec].push(...receivedTicks);
-        
+
         // Cap local data storage length
         if (state.ticksData[spec].length > chartConfig.maxTicks) {
             state.ticksData[spec].shift();
         }
 
         // Update LTP list values with flash effect
-        updateLtpItemValue(spec, receivedTicks[receivedTicks.length - 1]);
+        if (receivedTicks.length > 0) {
+            updateLtpItemValue(spec, receivedTicks[receivedTicks.length - 1]);
+        }
     }
+
+    // Record real tick-arrival state for the diagnostics strip / stall watcher
+    state.lastTickAt = Date.now();
+    state.totalTicksReceived += tickCountThisMessage;
+    document.getElementById("diag-tick-count").innerText = String(state.totalTicksReceived);
+    document.getElementById("diag-clock-status").innerText = "Running";
+    document.getElementById("diag-clock-status").style.color = "var(--accent-success)";
+    document.getElementById("stall-warning").classList.add("hidden");
 
     // Refresh active chart symbol
     if (state.chartSymbol && ticksPayload[state.chartSymbol]) {
         drawRealTimeChart(state.chartSymbol);
     }
-    
+
     // Check if session completed
     if (msg.status === "completed") {
         logToTerminal("System: Simulation date replayed completely.", "success");
         stopSimulation();
+    }
+}
+
+// Polls once a second while a session is active: if a WebSocket is open but
+// no tick_update has arrived in STALL_THRESHOLD_MS, the server-side tick
+// clock loop is very likely not running (it's a separate `scheduler`
+// process/container in docker-compose.yml, distinct from the `api` process
+// this page talks to - see ENABLE_SIMULATOR_LOOP). Surfaces that distinction
+// directly instead of leaving the chart silently frozen with no explanation.
+function startStallWatcher() {
+    stopStallWatcher();
+    state.stallCheckInterval = setInterval(() => {
+        if (!state.lastTickAt) return; // still waiting on the very first tick
+        const ageMs = Date.now() - state.lastTickAt;
+        document.getElementById("diag-last-tick-age").innerText = `${(ageMs / 1000).toFixed(1)}s ago`;
+
+        const stallWarning = document.getElementById("stall-warning");
+        if (ageMs > STALL_THRESHOLD_MS) {
+            stallWarning.classList.remove("hidden");
+            document.getElementById("diag-clock-status").innerText = "Stalled";
+            document.getElementById("diag-clock-status").style.color = "var(--accent-danger)";
+        }
+    }, 1000);
+}
+
+function stopStallWatcher() {
+    if (state.stallCheckInterval) {
+        clearInterval(state.stallCheckInterval);
+        state.stallCheckInterval = null;
     }
 }
 
@@ -496,12 +577,14 @@ function updateLtpItemValue(spec, lastTick) {
 // Stop simulation session
 async function stopSimulation() {
     logToTerminal("System: Stopping simulation and closing stream...");
-    
+
+    stopStallWatcher();
+
     if (state.websocket) {
         state.websocket.close();
         state.websocket = null;
     }
-    
+
     if (state.activeSession) {
         // Call pause backend API just in case
         try {
@@ -513,21 +596,25 @@ async function stopSimulation() {
             // silent ignore
         }
     }
-    
+
     state.activeSession = null;
     state.ticksData = {};
     state.chartSymbol = null;
-    
+    state.totalTicksReceived = 0;
+    state.lastTickAt = null;
+
     // Update elements
     document.getElementById("sandbox-clock-container").classList.add("hidden");
+    document.getElementById("session-diag-strip").classList.add("hidden");
+    document.getElementById("stall-warning").classList.add("hidden");
     document.getElementById("btn-start-simulation").classList.remove("hidden");
     document.getElementById("btn-stop-simulation").classList.add("hidden");
     setStartLoadingState(false);
-    
+
     document.getElementById("ltp-feed-list").innerHTML = `
         <div class="price-item empty" style="justify-content: center; color: var(--text-secondary); font-size: 13px;">No active stream</div>
     `;
-    
+
     drawChartPlaceholder("Select an instrument & subscribe to start feed");
 }
 

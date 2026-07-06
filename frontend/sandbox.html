@@ -502,7 +502,7 @@
                         </div>
                     </div>
                     <p class="card-subtitle">Connect your credentials to query active scopes, limits, and authenticate the session creator.</p>
-                    
+
                     <form id="key-connect-form">
                         <div class="form-group">
                             <label for="client-id">Client ID (API Key)</label>
@@ -514,6 +514,18 @@
                         </div>
                         <button type="submit" class="btn btn-gradient" id="btn-connect" style="width: 100%; margin-top: 20px; font-weight: 600; padding: 12px;">Connect Key</button>
                     </form>
+
+                    <!-- Backend connectivity: API reachable + tick clock loop actually running -->
+                    <div style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 14px; display: flex; flex-direction: column; gap: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px;">
+                            <span style="color: var(--text-secondary);">API Server</span>
+                            <span id="diag-api-status" style="font-weight: 600;">Checking...</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px;">
+                            <span style="color: var(--text-secondary);">Tick Clock Loop</span>
+                            <span id="diag-clock-status" style="font-weight: 600;">Unknown</span>
+                        </div>
+                    </div>
 
                     <!-- Key Details (Initially hidden, revealed on verification success) -->
                     <div id="key-details-container" class="hidden" style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 16px;">
@@ -636,6 +648,31 @@
                             <span class="clock-icon">🕒</span>
                             <span id="sandbox-clock-val">09:15:00</span>
                         </div>
+                    </div>
+
+                    <!-- Session Diagnostics Strip: real state, not decoration -->
+                    <div class="hidden" id="session-diag-strip" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; font-size: 12px;">
+                        <div style="background: rgba(10,14,23,0.5); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px;">
+                            <div style="color: var(--text-secondary);">Session ID</div>
+                            <div id="diag-session-id" style="font-family: 'Fira Code', monospace; font-weight: 600; margin-top: 2px;">--</div>
+                        </div>
+                        <div style="background: rgba(10,14,23,0.5); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px;">
+                            <div style="color: var(--text-secondary);">Replaying Date</div>
+                            <div id="diag-session-date" style="font-weight: 600; margin-top: 2px;">--</div>
+                        </div>
+                        <div style="background: rgba(10,14,23,0.5); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px;">
+                            <div style="color: var(--text-secondary);">Ticks Received</div>
+                            <div id="diag-tick-count" style="font-weight: 600; margin-top: 2px;">0</div>
+                        </div>
+                        <div style="background: rgba(10,14,23,0.5); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px;">
+                            <div style="color: var(--text-secondary);">Last Tick Received</div>
+                            <div id="diag-last-tick-age" style="font-weight: 600; margin-top: 2px;">--</div>
+                        </div>
+                    </div>
+
+                    <!-- Stall Warning: shown when a session is active/connected but no ticks have arrived recently -->
+                    <div class="hidden" id="stall-warning" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 12px; color: #fca5a5;">
+                        ⚠ No ticks received in over 5 seconds. The WebSocket is connected, but the server-side tick clock loop may not be running (it lives in a separate <code>scheduler</code> process/container, not the API process). Data will stay frozen until that process is confirmed running.
                     </div>
 
                     <div class="dashboard-grid">
