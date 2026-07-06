@@ -124,6 +124,27 @@ function initEventListeners() {
     document.getElementById("btn-health-check").addEventListener("click", () => {
         runFullHealthCheck();
     });
+
+    // Copy Client ID / Client Secret to clipboard
+    document.getElementById("btn-copy-client-id").addEventListener("click", () => {
+        copyFieldToClipboard("client-id", "btn-copy-client-id");
+    });
+    document.getElementById("btn-copy-client-secret").addEventListener("click", () => {
+        copyFieldToClipboard("client-secret", "btn-copy-client-secret");
+    });
+}
+
+// Copies an input field's current value to the clipboard and briefly
+// flashes the triggering button's label to confirm the copy succeeded.
+function copyFieldToClipboard(inputId, buttonId) {
+    const value = document.getElementById(inputId).value;
+    if (!value) return;
+    navigator.clipboard.writeText(value).then(() => {
+        const btn = document.getElementById(buttonId);
+        const original = btn.innerText;
+        btn.innerText = "Copied!";
+        setTimeout(() => { btn.innerText = original; }, 2000);
+    });
 }
 
 // Connect API credentials

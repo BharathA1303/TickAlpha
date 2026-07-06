@@ -518,11 +518,17 @@
                     <form id="key-connect-form">
                         <div class="form-group">
                             <label for="client-id">Client ID (API Key)</label>
-                            <input type="text" id="client-id" placeholder="Enter Client ID (client_...)" required style="width: 100%; margin-top: 6px;">
+                            <div style="display: flex; gap: 6px; margin-top: 6px;">
+                                <input type="text" id="client-id" placeholder="Enter Client ID (client_...)" required style="flex-grow: 1;">
+                                <button type="button" class="btn btn-sm secondary-btn" id="btn-copy-client-id">Copy</button>
+                            </div>
                         </div>
                         <div class="form-group" style="margin-top: 14px;">
                             <label for="client-secret">Client Secret</label>
-                            <input type="password" id="client-secret" placeholder="Enter Client Secret" required style="width: 100%; margin-top: 6px;">
+                            <div style="display: flex; gap: 6px; margin-top: 6px;">
+                                <input type="password" id="client-secret" placeholder="Enter Client Secret" required style="flex-grow: 1;">
+                                <button type="button" class="btn btn-sm secondary-btn" id="btn-copy-client-secret">Copy</button>
+                            </div>
                         </div>
                         <button type="submit" class="btn btn-gradient" id="btn-connect" style="width: 100%; margin-top: 20px; font-weight: 600; padding: 12px;">Connect Key</button>
                     </form>
