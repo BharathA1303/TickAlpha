@@ -2,8 +2,10 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import date
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from sqlalchemy import select
 
@@ -167,6 +169,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     substitute for fixing the underlying bug (logged in full here), but a
     real broker-style API should never hand a client a non-JSON body.
     """
+    if isinstance(exc, (StarletteHTTPException, RequestValidationError)):
+        raise exc
     logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
