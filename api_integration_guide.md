@@ -5,6 +5,11 @@ This guide details how external applications (such as client frontends, dashboar
 **Live base URL**: `http://147.93.168.157:8003` (WebSocket at `ws://147.93.168.157:8003`)
 Local development default: `http://localhost:8000`
 
+> [!IMPORTANT]
+> **API PORT WARNING (Port 3003 vs 8003)**:
+> * **Port `8003`** is the backend API service. All integration requests (REST endpoints, JWT authentication tokens, and WebSocket feeds) **must** go to port `8003`.
+> * **Port `3003`** is only for the frontend user console dashboard. Do **not** point your automated platform or API queries to port `3003`, as doing so will return connection failures or static HTML pages rather than API data.
+
 ---
 
 ## 1. Compliance Delay Gate Rule

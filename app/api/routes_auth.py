@@ -1,3 +1,4 @@
+import hmac
 import uuid
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -32,9 +33,23 @@ async def admin_login(req: AdminLoginRequest):
     """
     Authenticates the admin console user and issues an admin-scoped JWT.
     """
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Admin console is temporarily deactivated."
+    username_ok = hmac.compare_digest(req.username, settings.ADMIN_USERNAME)
+    password_ok = hmac.compare_digest(req.password, settings.ADMIN_PASSWORD)
+    if not (username_ok and password_ok):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin username or password",
+        )
+
+    access_token = create_access_token(
+        client_id=ADMIN_SUBJECT,
+        scopes=["admin"],
+        expires_in_seconds=3600
+    )
+
+    return TokenResponse(
+        access_token=access_token,
+        expires_in=3600
     )
 
 class FeedTokenRequest(BaseModel):
