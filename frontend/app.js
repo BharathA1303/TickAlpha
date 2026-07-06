@@ -4,6 +4,49 @@ const state = {
     apiBase: window.location.origin
 };
 
+// Copies an input field's current value to the clipboard and briefly
+// flashes the triggering button's label to confirm the copy succeeded.
+// navigator.clipboard requires a secure context (HTTPS or localhost) - on
+// a plain HTTP deployment that API is unavailable/silently rejects, so this
+// falls back to the older execCommand("copy") approach, which works on
+// insecure origins too.
+function copyFieldToClipboard(inputId, buttonId, restoreLabel) {
+    const input = document.getElementById(inputId);
+    const value = input.value;
+    if (!value) return;
+
+    const flashCopied = () => {
+        const btn = document.getElementById(buttonId);
+        btn.innerText = "Copied!";
+        setTimeout(() => { btn.innerText = restoreLabel; }, 2000);
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(value).then(flashCopied).catch(() => fallbackCopy(value, flashCopied));
+    } else {
+        fallbackCopy(value, flashCopied);
+    }
+}
+
+function fallbackCopy(value, onSuccess) {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    try {
+        const ok = document.execCommand("copy");
+        if (ok) onSuccess();
+        else alert("Copy failed. Please select and copy the value manually.");
+    } catch (e) {
+        alert("Copy failed. Please select and copy the value manually.");
+    } finally {
+        document.body.removeChild(textarea);
+    }
+}
+
 // Initialize Application: the console loads directly, no login step -
 // an admin session token is acquired silently in the background.
 document.addEventListener("DOMContentLoaded", () => {
@@ -164,43 +207,23 @@ function initForms() {
 
     document.getElementById("btn-copy-reveal-id").addEventListener("click", (e) => {
         e.preventDefault();
-        const val = document.getElementById("reveal-client-id").value;
-        navigator.clipboard.writeText(val).then(() => {
-            const btn = document.getElementById("btn-copy-reveal-id");
-            btn.innerText = "Copied!";
-            setTimeout(() => { btn.innerText = "Copy"; }, 2000);
-        });
+        copyFieldToClipboard("reveal-client-id", "btn-copy-reveal-id", "Copy");
     });
 
     document.getElementById("btn-copy-reveal-secret").addEventListener("click", (e) => {
         e.preventDefault();
-        const val = document.getElementById("reveal-client-secret").value;
-        navigator.clipboard.writeText(val).then(() => {
-            const btn = document.getElementById("btn-copy-reveal-secret");
-            btn.innerText = "Copied!";
-            setTimeout(() => { btn.innerText = "Copy"; }, 2000);
-        });
+        copyFieldToClipboard("reveal-client-secret", "btn-copy-reveal-secret", "Copy");
     });
 
     // Copy buttons for generated keys
     document.getElementById("btn-copy-gen-id").addEventListener("click", (e) => {
         e.preventDefault();
-        const val = document.getElementById("generated-client-id").value;
-        navigator.clipboard.writeText(val).then(() => {
-            const btn = document.getElementById("btn-copy-gen-id");
-            btn.innerText = "Copied!";
-            setTimeout(() => { btn.innerText = "Copy"; }, 2000);
-        });
+        copyFieldToClipboard("generated-client-id", "btn-copy-gen-id", "Copy");
     });
 
     document.getElementById("btn-copy-gen-secret").addEventListener("click", (e) => {
         e.preventDefault();
-        const val = document.getElementById("generated-client-secret").value;
-        navigator.clipboard.writeText(val).then(() => {
-            const btn = document.getElementById("btn-copy-gen-secret");
-            btn.innerText = "Copied!";
-            setTimeout(() => { btn.innerText = "Copy"; }, 2000);
-        });
+        copyFieldToClipboard("generated-client-secret", "btn-copy-gen-secret", "Copy");
     });
 
     document.getElementById("btn-test-sandbox").addEventListener("click", (e) => {

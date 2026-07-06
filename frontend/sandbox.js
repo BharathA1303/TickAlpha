@@ -136,15 +136,47 @@ function initEventListeners() {
 
 // Copies an input field's current value to the clipboard and briefly
 // flashes the triggering button's label to confirm the copy succeeded.
+// navigator.clipboard requires a secure context (HTTPS or localhost) - this
+// server is plain HTTP, so that API is unavailable/silently rejects there.
+// Falls back to the older execCommand("copy") approach (via a temporary
+// selected textarea), which works on insecure origins too.
 function copyFieldToClipboard(inputId, buttonId) {
-    const value = document.getElementById(inputId).value;
+    const input = document.getElementById(inputId);
+    const value = input.value;
     if (!value) return;
-    navigator.clipboard.writeText(value).then(() => {
+
+    const flashCopied = () => {
         const btn = document.getElementById(buttonId);
         const original = btn.innerText;
         btn.innerText = "Copied!";
         setTimeout(() => { btn.innerText = original; }, 2000);
-    });
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(value).then(flashCopied).catch(() => fallbackCopy(value, flashCopied));
+    } else {
+        fallbackCopy(value, flashCopied);
+    }
+}
+
+function fallbackCopy(value, onSuccess) {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    // Keep it out of the visible viewport but still selectable/focusable
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    try {
+        const ok = document.execCommand("copy");
+        if (ok) onSuccess();
+        else alert("Copy failed. Please select and copy the value manually.");
+    } catch (e) {
+        alert("Copy failed. Please select and copy the value manually.");
+    } finally {
+        document.body.removeChild(textarea);
+    }
 }
 
 // Connect API credentials
