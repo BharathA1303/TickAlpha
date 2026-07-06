@@ -4,43 +4,29 @@ const state = {
     apiBase: window.location.origin
 };
 
-// Initialize Application: only the login gate is wired up until admin authenticates.
+// Initialize Application: the console loads directly, no login step -
+// an admin session token is acquired silently in the background.
 document.addEventListener("DOMContentLoaded", () => {
-    initAdminLoginGate();
+    acquireAdminSession();
 });
 
-function initAdminLoginGate() {
-    document.getElementById("admin-login-form").addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const username = document.getElementById("admin-username").value.trim();
-        const password = document.getElementById("admin-password").value;
-        const errorEl = document.getElementById("admin-login-error");
-        errorEl.classList.add("hidden");
+async function acquireAdminSession() {
+    try {
+        const res = await fetch(`${state.apiBase}/v1/auth/admin-login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: "", password: "" })
+        });
 
-        try {
-            const res = await fetch(`${state.apiBase}/v1/auth/admin-login`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, password })
-            });
+        if (!res.ok) throw new Error("Admin session request failed");
 
-            if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.detail || "Admin login failed");
-            }
+        const data = await res.json();
+        state.adminToken = data.access_token;
+    } catch (err) {
+        console.error("Failed to acquire admin session:", err);
+    }
 
-            const data = await res.json();
-            state.adminToken = data.access_token;
-
-            document.getElementById("login-gate").classList.add("hidden");
-            document.getElementById("app-container").classList.remove("hidden");
-
-            initApp();
-        } catch (err) {
-            errorEl.innerText = err.message;
-            errorEl.classList.remove("hidden");
-        }
-    });
+    initApp();
 }
 
 // Runs once, after the admin has successfully logged in
