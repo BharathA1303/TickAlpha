@@ -170,13 +170,26 @@ async def ensure_ticks_cached(
     # version-namespaced cache key and, on a miss, tick generation itself).
     if not eod_data:
         logger.info(f"Fetching current EOD data for {exchange}:{segment}:{symbol} on {target_date}...")
-        eod_data = await get_eligible_data(
-            db=db,
-            symbol=symbol,
-            exchange=exchange,
-            segment=segment,
-            market_timestamp=target_date
-        )
+        try:
+            eod_data = await get_eligible_data(
+                db=db,
+                symbol=symbol,
+                exchange=exchange,
+                segment=segment,
+                market_timestamp=target_date
+            )
+        except ValueError as e:
+            # get_eligible_data raises ValueError when target_date falls
+            # within the restricted compliance window (e.g. a session's date
+            # rolled into the delay-gate cutoff after the session was
+            # created). Treat this the same as "no data" rather than letting
+            # it propagate as an unhandled exception - callers already
+            # handle a None return (see subscribe_symbols, which also
+            # pre-checks the gate to give a clearer 400 message up front;
+            # this is the defense-in-depth backstop for any caller that
+            # doesn't pre-check).
+            logger.warning(f"Compliance gate rejected {exchange}:{segment}:{symbol} on {target_date}: {e}")
+            return None
 
     if not eod_data:
         logger.warning(f"No EOD data found for {exchange}:{segment}:{symbol} on {target_date}")

@@ -183,8 +183,27 @@ async def subscribe_symbols(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found"
         )
-        
+
     target_date = date.fromisoformat(state["date"])
+
+    # Re-validate the delay gate at subscribe-time, not just at session
+    # creation. A session's date is checked once in create_session, but the
+    # rolling 3-day cutoff advances daily - a session created near the
+    # boundary (or left open for a while before subscribing) can have its
+    # date roll INTO the restricted window by the time subscribe is called.
+    # Without this check, get_eligible_data's ValueError for exactly this
+    # case propagated all the way up as an unhandled 500 instead of a clean
+    # 400 - this is a real compliance-boundary condition, not just a
+    # theoretical one, so check it explicitly here rather than relying on
+    # every downstream call site to handle the ValueError correctly.
+    cutoff = get_delay_cutoff()
+    if target_date > cutoff:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Session date {target_date} is now within the restricted 3-day compliance window "
+                   f"(cutoff: {cutoff}). This session's date has become restricted since the session "
+                   f"was created; create a new session for an eligible date."
+        )
 
     current_subs = set(state["subscriptions"])
     # Maps resolved_spec ("EXCHANGE:SEGMENT:SYMBOL") -> the price_data.version
