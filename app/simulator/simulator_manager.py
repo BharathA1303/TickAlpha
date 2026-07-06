@@ -8,7 +8,8 @@ import redis.asyncio as aioredis
 from sqlalchemy import select
 
 from app.config import settings
-from app.core.cache import get_cached_response, set_cached_response, redis_client
+from app.core import cache as cache_module
+from app.core.cache import get_cached_response, set_cached_response
 from app.core.delay_gate import get_delay_cutoff
 from app.db.session import AsyncSessionLocal
 from app.db.models import PriceData
@@ -166,9 +167,9 @@ class SimulatorManager:
     async def publish_to_session(self, session_id: str, message: dict):
         """Broadcasts messages to Redis Pub/Sub and/or registered local in-memory listeners."""
         # 1. Redis Pub/Sub
-        if redis_client:
+        if cache_module.redis_client:
             try:
-                await redis_client.publish(
+                await cache_module.redis_client.publish(
                     f"session_channel:{session_id}",
                     json.dumps(message)
                 )
@@ -363,9 +364,9 @@ class SimulatorManager:
             try:
                 # Get list of active session IDs
                 active_ids: Set[str] = set()
-                if redis_client:
+                if cache_module.redis_client:
                     try:
-                        active_ids = await redis_client.smembers("active_sessions")
+                        active_ids = await cache_module.redis_client.smembers("active_sessions")
                     except Exception as e:
                         logger.error(f"Redis smembers error: {e}")
                 else:

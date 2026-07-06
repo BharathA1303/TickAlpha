@@ -9,7 +9,7 @@ from app.config import settings
 from app.db.session import get_db
 from app.db.models import APIKey
 from app.core.auth import hash_secret, create_access_token, verify_jwt_token, ADMIN_SUBJECT
-from app.core.cache import set_cached_response, redis_client
+from app.core.cache import set_cached_response
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/auth", tags=["Authentication"])

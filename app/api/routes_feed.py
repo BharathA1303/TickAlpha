@@ -4,7 +4,8 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
 import redis.asyncio as aioredis
 
-from app.core.cache import get_cached_response, redis_client
+from app.core import cache as cache_module
+from app.core.cache import get_cached_response
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Real-time Feed"])
@@ -33,9 +34,9 @@ async def websocket_feed(
     client_id, session_id = token_val.split(":", 1)
     
     # 2. Consume the token (single-use enforcement)
-    if redis_client:
+    if cache_module.redis_client:
         try:
-            await redis_client.delete(token_key)
+            await cache_module.redis_client.delete(token_key)
         except Exception as e:
             logger.error(f"Failed to delete feed token in Redis: {e}")
             
@@ -84,9 +85,10 @@ async def websocket_feed(
             logger.error(f"Error in local queue websocket forwarding loop: {e}")
 
     # Set up subscription task
-    if redis_client:
+    pubsub = None
+    if cache_module.redis_client:
         try:
-            pubsub = redis_client.pubsub()
+            pubsub = cache_module.redis_client.pubsub()
             await pubsub.subscribe(f"session_channel:{session_id}")
             pubsub_task = asyncio.create_task(listen_to_pubsub(pubsub))
             logger.info(f"Subscribed WebSocket to Redis Pub/Sub channel for session {session_id}")
@@ -134,7 +136,7 @@ async def websocket_feed(
             if not simulator_manager.listeners[session_id]:
                 del simulator_manager.listeners[session_id]
                 
-        if redis_client and 'pubsub' in locals():
+        if pubsub is not None:
             try:
                 await pubsub.unsubscribe(f"session_channel:{session_id}")
                 await pubsub.close()

@@ -12,7 +12,8 @@ from app.db.session import get_db
 from app.db.models import APIKey, PriceData
 from app.core.auth import verify_jwt_token
 from app.core.delay_gate import get_delay_cutoff
-from app.core.cache import get_cached_response, set_cached_response, redis_client
+from app.core import cache as cache_module
+from app.core.cache import get_cached_response, set_cached_response
 from app.simulator.brownian_bridge import ensure_ticks_cached
 
 logger = logging.getLogger(__name__)
@@ -55,12 +56,12 @@ async def save_session_state(session_id: str, state: dict):
     await set_cached_response(f"session:{session_id}", json.dumps(state), ttl=86400) # 24h TTL
     
     # Add to active set if status is active
-    if redis_client:
+    if cache_module.redis_client:
         try:
             if state["status"] == "active":
-                await redis_client.sadd("active_sessions", session_id)
+                await cache_module.redis_client.sadd("active_sessions", session_id)
             else:
-                await redis_client.srem("active_sessions", session_id)
+                await cache_module.redis_client.srem("active_sessions", session_id)
         except Exception as e:
             logger.error(f"Redis set operation failed: {e}")
 
