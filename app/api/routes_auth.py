@@ -32,19 +32,10 @@ async def admin_login(req: AdminLoginRequest):
     """
     Authenticates the admin console user and issues an admin-scoped JWT.
     """
-    if req.username != settings.ADMIN_USERNAME or req.password != settings.ADMIN_PASSWORD:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid admin username or password"
-        )
-
-    access_token = create_access_token(
-        client_id=ADMIN_SUBJECT,
-        scopes=["admin"],
-        expires_in_seconds=3600
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Admin console is temporarily deactivated."
     )
-
-    return TokenResponse(access_token=access_token, expires_in=3600)
 
 class FeedTokenRequest(BaseModel):
     session_id: str = Field(..., description="The ID of the active replay session")
